@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: Sprout Identity API
+  version: 1.0.0
+  description: |
+    Sign-up, sign-in with password and TOTP two-factor, and token management for Sprout.
+
+    Clients reach these endpoints through the gateway under `/api/identity`. The gateway forwards
+    `/api/identity/v1/...` to the identity service's `/v1/...` unchanged.
+
+    Access tokens are RS256 JWTs valid for 15 minutes. Refresh tokens are opaque, single-use and
+    rotate on every refresh; presenting an already-used refresh token revokes the whole session.
+    Errors use RFC 9457 problem details with a stable machine-readable `code`.
+servers:
+  - url: http://localhost:8100/api/identity
+    description: Through the gateway (how clients call it)
+  - url: http://localhost:8101
+    description: Identity service directly (service-to-service and tests only)
+tags:
+  - name: users
+  - name: sessions
+  - name: totp
+  - name: keys
+paths:
+  /v1/users:
+    post:
+      tags: [users]
+      operationId: signUp
+      summary: Create an account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignUpRequest' }
+      responses:
+        '201':
+          description: Account created. The person signs in next.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409':
+          description: An account with this email already exists (`EMAIL_TAKEN`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/users/me:
+    get:
+      tags: [users]
+      operationId: getMe
+      summary: The signed-in person's account
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /v1/sessions:
+    post:
+      tags: [sessions]
+      operationId: signIn
+      summary: Sign in with email and password
+      description: |
+        Returns tokens directly when two-factor is off. When it is on, returns a short-lived
+        challenge that `/v1/sessions/totp` completes. Five wrong passwords in a row lock the
+        account for 15 minutes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignInRequest' }
+      responses:
+        '200':
+          description: Signed in, or a two-factor challenge issued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignInResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Wrong email or password (`INVALID_CREDENTIALS`). The response never says which.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: Too many failed attempts (`ACCOUNT_LOCKED`). `retryAfterSeconds` says when to try again.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/sessions/totp:
+    post:
+      tags: [sessions]
+      operationId: completeTotp
+      summary: Complete sign-in with a two-factor code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TotpVerifyRequest' }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignInResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Wrong code (`INVALID_TOTP`) or the challenge expired or was used (`CHALLENGE_EXPIRED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: Too many wrong codes (`ACCOUNT_LOCKED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/sessions/current:
+    delete:
+      tags: [sessions]
+      operationId: signOut
+      summary: Sign out and revoke the session's refresh tokens
+      responses:
+        '204': { description: Signed out. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /v1/tokens/refresh:
+    post:
+      tags: [sessions]
+      operationId: refreshTokens
+      summary: Exchange a refresh token for a new token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New tokens. The old refresh token is now spent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Unknown, expired or revoked token (`INVALID_REFRESH_TOKEN`), or a spent token presented again (`REFRESH_TOKEN_REUSED`, which also revokes the session).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/users/me/totp:
+    post:
+      tags: [totp]
+      operationId: startTotpEnrollment
+      summary: Start setting up two-factor
+      description: Returns a new secret and an otpauth URI for an authenticator app. Two-factor stays off until confirmed.
+      responses:
+        '200':
+          description: The pending secret.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TotpEnrollment' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409':
+          description: Two-factor is already on (`TOTP_ALREADY_ENABLED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/users/me/totp/confirm:
+    post:
+      tags: [totp]
+      operationId: confirmTotpEnrollment
+      summary: Turn two-factor on with a code from the authenticator app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TotpConfirmRequest' }
+      responses:
+        '204': { description: Two-factor is on. }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: Not signed in (`UNAUTHENTICATED`) or wrong code (`INVALID_TOTP`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: No enrollment was started (`TOTP_NOT_STARTED`) or two-factor is already on (`TOTP_ALREADY_ENABLED`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /.well-known/jwks.json:
+    get:
+      tags: [keys]
+      operationId: getJwks
+      summary: Public keys that verify access tokens
+      security: []
+      responses:
+        '200':
+          description: A JSON Web Key Set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Jwks' }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    ValidationFailed:
+      description: The request body is missing, malformed or breaks a rule (`VALIDATION_FAILED`, `WEAK_PASSWORD`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthenticated:
+      description: No valid access token (`UNAUTHENTICATED`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    SignUpRequest:
+      type: object
+      required: [email, password, displayName]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254, example: asha@example.com }
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+          description: At least 10 characters and not a commonly used password.
+          example: monsoon-mango-42
+        displayName: { type: string, minLength: 1, maxLength: 60, example: Asha }
+    User:
+      type: object
+      required: [id, email, displayName, totpEnabled, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        totpEnabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    SignInRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, maxLength: 254 }
+        password: { type: string, maxLength: 128 }
+    SignInResponse:
+      type: object
+      required: [status]
+      description: |
+        `AUTHENTICATED` carries `tokens`. `TOTP_REQUIRED` carries `challengeId` and `challengeExpiresAt`;
+        send the code to `/v1/sessions/totp` before it expires (5 minutes).
+      properties:
+        status: { type: string, enum: [AUTHENTICATED, TOTP_REQUIRED] }
+        tokens: { $ref: '#/components/schemas/TokenPair' }
+        challengeId: { type: string }
+        challengeExpiresAt: { type: string, format: date-time }
+    TotpVerifyRequest:
+      type: object
+      required: [challengeId, code]
+      additionalProperties: false
+      properties:
+        challengeId: { type: string, maxLength: 100 }
+        code: { type: string, pattern: '^[0-9]{6}$', example: '492039' }
+    TokenPair:
+      type: object
+      required: [accessToken, tokenType, expiresIn, refreshToken]
+      properties:
+        accessToken: { type: string, description: 'RS256 JWT. Claims include sub (user id), sid (session id), iss, aud and exp.' }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Seconds until the access token expires. }
+        refreshToken: { type: string, description: 'Opaque, single use, valid for 30 days.' }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken: { type: string, maxLength: 200 }
+    TotpEnrollment:
+      type: object
+      required: [secret, otpauthUri]
+      properties:
+        secret: { type: string, description: Base32 secret for manual entry. }
+        otpauthUri: { type: string, description: 'otpauth://totp/... for a QR code.' }
+    TotpConfirmRequest:
+      type: object
+      required: [code]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$' }
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, kid, n, e]
+            properties:
+              kty: { type: string }
+              kid: { type: string }
+              use: { type: string }
+              alg: { type: string }
+              n: { type: string }
+              e: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      description: RFC 9457 problem details plus a stable `code`.
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - WEAK_PASSWORD
+            - EMAIL_TAKEN
+            - INVALID_CREDENTIALS
+            - ACCOUNT_LOCKED
+            - INVALID_TOTP
+            - CHALLENGE_EXPIRED
+            - INVALID_REFRESH_TOKEN
+            - REFRESH_TOKEN_REUSED
+            - UNAUTHENTICATED
+            - TOTP_ALREADY_ENABLED
+            - TOTP_NOT_STARTED
+            - RATE_LIMITED
+            - UPSTREAM_UNAVAILABLE
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

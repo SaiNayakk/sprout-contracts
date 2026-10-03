@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags are needed for the breaking-change check
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and test
+        run: mvn -B verify
+      - name: Breaking-change check against the last release
+        run: |
+          last=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$last" ]; then echo "No release yet: nothing to compare against."; exit 0; fi
+          echo "Comparing with $last"
+          status=0
+          for f in src/main/resources/sprout/contracts/openapi/*.yaml; do
+            if ! git cat-file -e "$last:$f" 2>/dev/null; then echo "$f is new since $last"; continue; fi
+            mkdir -p /tmp/old && git show "$last:$f" > /tmp/old/spec.yaml
+            echo "::group::$f"
+            docker run --rm -v /tmp/old:/old -v "$PWD":/new openapitools/openapi-diff:latest \
+              /old/spec.yaml "/new/$f" --fail-on-incompatible || status=1
+            echo "::endgroup::"
+          done
+          if [ $status -ne 0 ]; then
+            echo "::error::A published spec changed incompatibly. Add a new major version file (e.g. identity-v2.yaml) instead."
+          fi
+          exit $status
