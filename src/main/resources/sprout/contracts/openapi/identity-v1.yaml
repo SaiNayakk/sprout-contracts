@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Sprout Identity API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Sign-up, sign-in with password and TOTP two-factor, and token management for Sprout.
 
@@ -34,6 +34,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/SignUpRequest' }
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '201':
           description: Account created. The person signs in next.
           content:
@@ -51,6 +52,7 @@ paths:
       operationId: getMe
       summary: The signed-in person's account
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '200':
           description: The account.
           content:
@@ -73,6 +75,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/SignInRequest' }
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '200':
           description: Signed in, or a two-factor challenge issued.
           content:
@@ -101,6 +104,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/TotpVerifyRequest' }
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '200':
           description: Signed in.
           content:
@@ -123,6 +127,7 @@ paths:
       operationId: signOut
       summary: Sign out and revoke the session's refresh tokens
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '204': { description: Signed out. }
         '401': { $ref: '#/components/responses/Unauthenticated' }
   /v1/tokens/refresh:
@@ -137,6 +142,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RefreshRequest' }
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '200':
           description: New tokens. The old refresh token is now spent.
           content:
@@ -155,6 +161,7 @@ paths:
       summary: Start setting up two-factor
       description: Returns a new secret and an otpauth URI for an authenticator app. Two-factor stays off until confirmed.
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '200':
           description: The pending secret.
           content:
@@ -177,6 +184,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/TotpConfirmRequest' }
       responses:
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '204': { description: Two-factor is on. }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401':
@@ -210,6 +218,16 @@ components:
   responses:
     ValidationFailed:
       description: The request body is missing, malformed or breaks a rule (`VALIDATION_FAILED`, `WEAK_PASSWORD`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServiceUnavailable:
+      description: |
+        A dependency (the database) is unreachable (`UPSTREAM_UNAVAILABLE`). Nothing was changed;
+        retry after `Retry-After` seconds. The service answers this within about 2 seconds instead of hanging.
+      headers:
+        Retry-After:
+          schema: { type: integer }
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
