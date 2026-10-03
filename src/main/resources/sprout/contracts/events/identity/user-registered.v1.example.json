@@ -1,0 +1,13 @@
+{
+  "eventId": "0b9a3c34-6f4e-4f7e-9a51-3d2f8f0d9c11",
+  "eventType": "identity.user.registered",
+  "eventVersion": 1,
+  "occurredAt": "2026-10-04T18:30:00Z",
+  "producer": "sprout-identity",
+  "correlationId": "req-7f3a2c",
+  "data": {
+    "userId": "5d1f2b8e-2a47-4c39-9e1b-7c0f6a2d4e90",
+    "email": "asha@example.com",
+    "displayName": "Asha"
+  }
+}
