@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Sprout Ledger API (internal)
+  version: 1.0.0
+  description: |
+    The books: Sprout's single source of truth for money. Internal only; the gateway never routes
+    here. Other services post to it and read balances from it.
+
+    **Double entry.** Every change is a journal entry of two or more postings whose debits equal its
+    credits. Entries are never edited or deleted; a mistake is corrected with a reversing entry.
+
+    **Accounts** are named and created on first use. Their kind decides which side increases them:
+
+    | Name | Kind | Can go below zero |
+    |---|---|---|
+    | `customer:{userId}:cash` | liability (money Sprout owes the customer) | no |
+    | `customer:{userId}:withdrawal-hold` | liability (being paid out) | no |
+    | `sprout:bank` | asset (client money held at Sprout Bank) | no |
+
+    **Amounts** are decimal strings in rupees with at most two decimals (`"1500.00"`), held internally
+    in paise, so no floating point ever touches money.
+
+    **Idempotent.** Every entry carries an `idempotencyKey`. Posting the same key with the same
+    content again returns the original entry (`200`); with different content it is refused (`409`).
+servers:
+  - url: http://localhost:8106
+    description: The ledger, directly (services only)
+paths:
+  /v1/journal-entries:
+    post:
+      operationId: postEntry
+      summary: Post a balanced journal entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostEntryRequest' }
+      responses:
+        '201':
+          description: Posted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalEntry' }
+        '200':
+          description: Already posted with this key and the same content; the original entry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'This idempotency key was used for a different entry (`IDEMPOTENCY_CONFLICT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Debits and credits differ (`UNBALANCED`), an account name is not one of the known kinds (`UNKNOWN_ACCOUNT`), or an account would go below zero (`INSUFFICIENT_FUNDS`). Nothing was posted.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/accounts/{account}:
+    get:
+      operationId: getAccount
+      summary: An account's balance
+      parameters:
+        - { name: account, in: path, required: true, schema: { type: string }, example: 'customer:5d1f2b8e-2a47-4c39-9e1b-7c0f6a2d4e90:cash' }
+      responses:
+        '200':
+          description: The balance. An account never posted to has a zero balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Balance' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/accounts/{account}/entries:
+    get:
+      operationId: listEntries
+      summary: An account's journal entries, newest first
+      parameters:
+        - { name: account, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200':
+          description: Entries touching the account.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalEntry' }
+  /v1/trial-balance:
+    get:
+      operationId: trialBalance
+      summary: Every account kind's total; assets must equal liabilities
+      responses:
+        '200':
+          description: The totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assets, liabilities, balanced, accounts]
+                properties:
+                  assets: { $ref: '#/components/schemas/Amount' }
+                  liabilities: { $ref: '#/components/schemas/Amount' }
+                  balanced: { type: boolean }
+                  accounts: { type: integer }
+components:
+  responses:
+    Problem:
+      description: 'A problem (`VALIDATION_FAILED`, `UNKNOWN_ACCOUNT`, `UPSTREAM_UNAVAILABLE`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+      example: '1500.00'
+    PostEntryRequest:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey, description, postings]
+      properties:
+        idempotencyKey: { type: string, minLength: 1, maxLength: 120, example: 'deposit:9b2f2c1e-0f3a-4c55-8f4e-1a2b3c4d5e6f' }
+        description: { type: string, maxLength: 200, example: Money added from Sprout Bank }
+        reference: { type: string, maxLength: 120, description: 'The business object this belongs to, e.g. a deposit id.' }
+        postings:
+          type: array
+          minItems: 2
+          maxItems: 20
+          items: { $ref: '#/components/schemas/Posting' }
+    Posting:
+      type: object
+      additionalProperties: false
+      required: [account, side, amount]
+      properties:
+        account: { type: string }
+        side: { type: string, enum: [DEBIT, CREDIT] }
+        amount: { $ref: '#/components/schemas/Amount' }
+    JournalEntry:
+      type: object
+      required: [id, idempotencyKey, description, postings, postedAt]
+      properties:
+        id: { type: string, format: uuid }
+        idempotencyKey: { type: string }
+        description: { type: string }
+        reference: { type: string }
+        postings:
+          type: array
+          items: { $ref: '#/components/schemas/Posting' }
+        postedAt: { type: string, format: date-time }
+    Balance:
+      type: object
+      required: [account, kind, balance]
+      properties:
+        account: { type: string }
+        kind: { type: string, enum: [ASSET, LIABILITY] }
+        balance: { $ref: '#/components/schemas/Amount' }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNBALANCED, UNKNOWN_ACCOUNT, INSUFFICIENT_FUNDS, IDEMPOTENCY_CONFLICT, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }

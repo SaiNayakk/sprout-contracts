@@ -18,6 +18,18 @@ public final class Contracts {
     /** OpenAPI spec for the market-data service. */
     public static final String MARKETDATA_V1 = "sprout/contracts/openapi/marketdata-v1.yaml";
 
+    /** OpenAPI spec for the accounts service. */
+    public static final String ACCOUNTS_V1 = "sprout/contracts/openapi/accounts-v1.yaml";
+
+    /** OpenAPI spec for the ledger (internal). */
+    public static final String LEDGER_V1 = "sprout/contracts/openapi/ledger-v1.yaml";
+
+    /** OpenAPI spec for the payments service. */
+    public static final String PAYMENTS_V1 = "sprout/contracts/openapi/payments-v1.yaml";
+
+    /** OpenAPI spec for Sprout Bank, the simulated bank. */
+    public static final String BANK_V1 = "sprout/contracts/openapi/bank-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 
