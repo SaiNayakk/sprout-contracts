@@ -1,0 +1,72 @@
+name: Publish
+
+# Publishes a release to the Maven repository served from this repo's GitHub Pages
+# (https://sainayakk.github.io/sprout-contracts/maven). Runs for every v* tag, or by hand for an
+# older tag. The repository lives on the gh-pages branch and only ever grows: published versions
+# are never replaced.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v0.3.2
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: release
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and test the release
+        working-directory: release
+        run: mvn -B verify
+      - name: Fetch the published repository
+        run: |
+          if git ls-remote --exit-code --heads "https://github.com/${GITHUB_REPOSITORY}.git" gh-pages >/dev/null; then
+            git clone --quiet --branch gh-pages --depth 1 "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" pages
+          else
+            mkdir pages && cd pages && git init -q -b gh-pages \
+              && git remote add origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+      - name: Refuse to replace a published version
+        working-directory: release
+        run: |
+          version=$(mvn -q -B help:evaluate -Dexpression=project.version -DforceStdout)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ -d "../pages/maven/com/github/SaiNayakk/sprout-contracts/$version" ]; then
+            echo "::error::$version is already published; releases are never replaced"; exit 1
+          fi
+      - name: Deploy into the repository
+        working-directory: release
+        run: mvn -B deploy -DskipTests -DaltDeploymentRepository="pages::file://${GITHUB_WORKSPACE}/pages/maven"
+      - name: Publish
+        working-directory: pages
+        run: |
+          touch .nojekyll
+          cat > index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>sprout-contracts Maven repository</title>
+          <p>Maven repository for <a href="https://github.com/SaiNayakk/sprout-contracts">sprout-contracts</a>:
+          <code>https://sainayakk.github.io/sprout-contracts/maven</code>, artifact
+          <code>com.github.SaiNayakk:sprout-contracts</code>.</p>
+          HTML
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Publish sprout-contracts ${VERSION}"
+          git push -q origin gh-pages
