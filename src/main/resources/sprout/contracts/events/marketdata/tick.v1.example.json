@@ -1,0 +1,13 @@
+{
+  "eventType": "marketdata.tick",
+  "eventVersion": 1,
+  "producer": "sprout-marketdata",
+  "mode": "REPLAY",
+  "sessionDate": "2026-10-01",
+  "symbol": "RELIANCE",
+  "price": 1180.45,
+  "size": 1520,
+  "ts": "2026-10-01T09:16:12.400+05:30",
+  "seq": 42,
+  "emittedAt": "2026-10-05T08:12:03.118Z"
+}

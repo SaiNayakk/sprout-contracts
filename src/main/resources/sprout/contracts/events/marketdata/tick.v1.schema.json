@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sainayakk.github.io/sprout-platform/contracts/events/marketdata/tick.v1.schema.json",
+  "title": "marketdata.tick v1",
+  "description": "Published by market-data for every price change, on the subject md.tick.<SYMBOL>. High volume and short-lived: consumers that need the current price should keep the latest per symbol; a missed tick is superseded by the next one. seq increases by 1 per tick of a symbol, so a gap shows a consumer missed some.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventType", "eventVersion", "producer", "mode", "sessionDate", "symbol", "price", "size", "ts", "seq", "emittedAt"],
+  "properties": {
+    "eventType": { "const": "marketdata.tick" },
+    "eventVersion": { "const": 1 },
+    "producer": { "const": "sprout-marketdata" },
+    "mode": { "enum": ["REPLAY", "SYNTHETIC", "LIVE"] },
+    "sessionDate": { "type": "string", "format": "date", "description": "The trading day this tick belongs to." },
+    "symbol": { "type": "string", "pattern": "^[A-Z0-9&_-]{1,20}$" },
+    "price": { "type": "number", "exclusiveMinimum": 0 },
+    "size": { "type": "integer", "minimum": 0 },
+    "ts": { "type": "string", "format": "date-time", "description": "Market time of the trade, IST." },
+    "seq": { "type": "integer", "minimum": 1 },
+    "emittedAt": { "type": "string", "format": "date-time", "description": "Wall-clock time it was produced, UTC." }
+  }
+}

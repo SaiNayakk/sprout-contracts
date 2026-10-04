@@ -9,6 +9,8 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 | Contract | File | Owner |
 |---|---|---|
 | Identity API v1 | `src/main/resources/sprout/contracts/openapi/identity-v1.yaml` | sprout-identity |
+| Market Data API v1 | `src/main/resources/sprout/contracts/openapi/marketdata-v1.yaml` | sprout-marketdata |
+| `marketdata.tick` v1 | `src/main/resources/sprout/contracts/events/marketdata/tick.v1.schema.json` | sprout-marketdata |
 | `identity.user.registered` v1 | `src/main/resources/sprout/contracts/events/identity/user-registered.v1.schema.json` | sprout-identity |
 
 ## Using it

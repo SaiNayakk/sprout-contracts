@@ -1,0 +1,314 @@
+openapi: 3.0.3
+info:
+  title: Sprout Market Data API
+  version: 1.0.0
+  description: |
+    Instruments, quotes, candles and a live price stream for Sprout.
+
+    Clients reach these endpoints through the gateway under `/api/marketdata`. The gateway forwards
+    `/api/marketdata/v1/...` to the market-data service's `/v1/...` unchanged.
+
+    **Where prices come from.** The service runs in one of three modes, shown by `GET /v1/market`:
+
+    - `REPLAY`: real recorded NSE trading days, played back as if live, optionally faster than real
+      time. Prices inside each minute are generated so that every minute's open, high, low, close and
+      volume match the recording exactly.
+    - `SYNTHETIC`: generated, deterministic prices for tests and CI, where recorded data isn't available.
+    - `LIVE`: a live feed (planned).
+
+    The service never reveals the future: quotes, candles and the stream only ever show what had
+    happened by the current market time, in every mode.
+
+    Prices are numbers in rupees, rounded to the instrument's tick size. (APIs that move money use
+    decimal strings instead; market data is for display and pricing.)
+    Errors use RFC 9457 problem details with a stable machine-readable `code`.
+servers:
+  - url: http://localhost:8100/api/marketdata
+    description: Through the gateway (how clients call it)
+  - url: http://localhost:8103
+    description: Market-data service directly (service-to-service and tests only)
+tags:
+  - name: market
+  - name: instruments
+  - name: prices
+paths:
+  /v1/market:
+    get:
+      tags: [market]
+      operationId: getMarket
+      summary: Market state, mode and market time
+      security: []
+      responses:
+        '200':
+          description: The market right now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Market' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/instruments:
+    get:
+      tags: [instruments]
+      operationId: listInstruments
+      summary: Every instrument Sprout has prices for
+      security: []
+      responses:
+        '200':
+          description: All instruments, by symbol.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instruments]
+                properties:
+                  instruments:
+                    type: array
+                    items: { $ref: '#/components/schemas/Instrument' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/instruments/{symbol}:
+    get:
+      tags: [instruments]
+      operationId: getInstrument
+      summary: One instrument
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+      responses:
+        '200':
+          description: The instrument.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instrument' }
+        '404': { $ref: '#/components/responses/UnknownInstrument' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/quotes:
+    get:
+      tags: [prices]
+      operationId: getQuotes
+      summary: Latest quotes for up to 50 instruments
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          description: Comma-separated symbols, at most 50.
+          schema: { type: string, example: 'RELIANCE,TCS,INFY' }
+      responses:
+        '200':
+          description: One quote per requested symbol, in the order asked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [market, quotes]
+                properties:
+                  market: { $ref: '#/components/schemas/Market' }
+                  quotes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Quote' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/UnknownInstrument' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/candles/{symbol}:
+    get:
+      tags: [prices]
+      operationId: getCandles
+      summary: Price history as candles
+      description: |
+        `1m`: one-minute candles for the current session, up to the market time. The current, still
+        forming minute is included last, with `complete: false`.
+
+        `1d`: daily candles for up to two years, ending with the current session (incomplete while
+        the market is open).
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: interval
+          in: query
+          required: true
+          schema: { type: string, enum: ['1m', '1d'] }
+        - name: limit
+          in: query
+          required: false
+          description: The most recent N candles. Defaults to all available (at most 500).
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: Candles, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, interval, candles]
+                properties:
+                  symbol: { type: string }
+                  interval: { type: string, enum: ['1m', '1d'] }
+                  candles:
+                    type: array
+                    items: { $ref: '#/components/schemas/Candle' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/UnknownInstrument' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/stream:
+    get:
+      tags: [prices]
+      operationId: streamPrices
+      summary: Live prices as Server-Sent Events
+      description: |
+        A `text/event-stream` that stays open. On connect it sends one `quote` event per requested
+        symbol (the current state), then:
+
+        - `tick`: every price change, as a `Tick`.
+        - `market`: whenever the market state changes (opens, closes, a new replay day), as a `Market`.
+        - a `: heartbeat` comment every 15 seconds, so idle connections aren't cut by proxies.
+
+        **Slow clients get the latest price, not every price.** If a client can't keep up, the
+        service sends only the most recent tick per symbol (conflation). `seq` then jumps; a jump
+        means intermediate ticks were skipped, never that prices were wrong.
+
+        Reconnecting starts again with fresh `quote` events. At most 50 symbols per stream.
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          description: Comma-separated symbols, at most 50.
+          schema: { type: string, example: 'RELIANCE,TCS' }
+      responses:
+        '200':
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/UnknownInstrument' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      description: NSE symbol, upper case.
+      schema: { type: string, pattern: '^[A-Z0-9&_-]{1,20}$', example: RELIANCE }
+  responses:
+    ValidationFailed:
+      description: A parameter is missing or invalid (`VALIDATION_FAILED`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthenticated:
+      description: No valid access token (`UNAUTHENTICATED`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnknownInstrument:
+      description: No instrument with this symbol (`UNKNOWN_INSTRUMENT`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServiceUnavailable:
+      description: |
+        No price data is loaded yet, or the service is at its stream capacity (`UPSTREAM_UNAVAILABLE`).
+        Retry after `Retry-After` seconds.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Market:
+      type: object
+      required: [mode, state, sessionDate, marketTime, speed, source]
+      properties:
+        mode: { type: string, enum: [REPLAY, SYNTHETIC, LIVE] }
+        state:
+          type: string
+          enum: [PRE_OPEN, OPEN, CLOSED]
+          description: PRE_OPEN before 09:15 and CLOSED from 15:30, in market time.
+        sessionDate: { type: string, format: date, description: The trading day being shown. }
+        marketTime:
+          type: string
+          format: date-time
+          description: The current time in the market, in IST. In replay this is the replayed time.
+        speed:
+          type: number
+          description: Market seconds per real second. 1 is real time.
+        source: { type: string, description: 'Where the prices come from, in words.' }
+    Instrument:
+      type: object
+      required: [symbol, name, type, tickSize, tradable]
+      properties:
+        symbol: { type: string, example: RELIANCE }
+        name: { type: string, example: Reliance Industries Ltd. }
+        industry: { type: string, example: Oil Gas & Consumable Fuels }
+        isin: { type: string, example: INE002A01018 }
+        type: { type: string, enum: [EQUITY, INDEX] }
+        tickSize: { type: number, description: 'Smallest price step, in rupees.', example: 0.05 }
+        tradable: { type: boolean, description: False for indices. }
+    Quote:
+      type: object
+      required: [symbol, last, open, high, low, prevClose, change, changePercent, volume, ts, seq]
+      properties:
+        symbol: { type: string }
+        last: { type: number }
+        open: { type: number }
+        high: { type: number }
+        low: { type: number }
+        prevClose: { type: number, description: The previous session's close. }
+        change: { type: number, description: last - prevClose }
+        changePercent: { type: number, description: 'change / prevClose x 100, two decimals' }
+        volume: { type: integer, format: int64, description: Shares traded this session so far. }
+        ts: { type: string, format: date-time, description: Market time of the last price. }
+        seq: { type: integer, format: int64, description: The `seq` of the last tick. }
+    Candle:
+      type: object
+      required: [ts, open, high, low, close, volume, complete]
+      properties:
+        ts: { type: string, format: date-time, description: 'Start of the candle, IST.' }
+        open: { type: number }
+        high: { type: number }
+        low: { type: number }
+        close: { type: number }
+        volume: { type: integer, format: int64 }
+        complete: { type: boolean, description: False for the candle still forming. }
+    Tick:
+      type: object
+      required: [symbol, price, size, ts, seq, emittedAt]
+      description: One price change. Also published as the `marketdata.tick` v1 event.
+      properties:
+        symbol: { type: string }
+        price: { type: number }
+        size: { type: integer, format: int64, description: Shares traded at this price. }
+        ts: { type: string, format: date-time, description: Market time of the trade. }
+        seq: { type: integer, format: int64, description: Increases by 1 per tick of this symbol. }
+        emittedAt:
+          type: string
+          format: date-time
+          description: Wall-clock time the service produced it, UTC. For measuring delivery latency.
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      description: RFC 9457 problem details plus a stable `code`.
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - UNKNOWN_INSTRUMENT
+            - UNAUTHENTICATED
+            - RATE_LIMITED
+            - UPSTREAM_UNAVAILABLE
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

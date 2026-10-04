@@ -28,10 +28,39 @@ class ContractsTest {
     }
 
     @Test
+    void marketDataSpecParsesWithoutErrors() {
+        SwaggerParseResult result = new OpenAPIV3Parser().readContents(Contracts.read(Contracts.MARKETDATA_V1));
+        assertThat(result.getMessages()).isEmpty();
+        assertThat(result.getOpenAPI().getPaths()).containsKeys(
+                "/v1/market", "/v1/instruments", "/v1/instruments/{symbol}", "/v1/quotes",
+                "/v1/candles/{symbol}", "/v1/stream");
+    }
+
+    @Test
     void everyOperationHasAnId() {
-        var openApi = new OpenAPIV3Parser().readContents(Contracts.read(Contracts.IDENTITY_V1)).getOpenAPI();
-        openApi.getPaths().forEach((path, item) -> item.readOperations()
-                .forEach(op -> assertThat(op.getOperationId()).as(path).isNotBlank()));
+        for (String spec : new String[] {Contracts.IDENTITY_V1, Contracts.MARKETDATA_V1}) {
+            var openApi = new OpenAPIV3Parser().readContents(Contracts.read(spec)).getOpenAPI();
+            openApi.getPaths().forEach((path, item) -> item.readOperations()
+                    .forEach(op -> assertThat(op.getOperationId()).as(spec + " " + path).isNotBlank()));
+        }
+    }
+
+    @Test
+    void tickExampleMatchesItsSchema() throws Exception {
+        JsonSchema schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+                .getSchema(Contracts.read(Contracts.TICK_V1));
+        JsonNode example = json.readTree(Contracts.read("sprout/contracts/events/marketdata/tick.v1.example.json"));
+        assertThat(schema.validate(example)).isEmpty();
+    }
+
+    @Test
+    void tickRejectsAZeroPriceAndUnknownFields() throws Exception {
+        JsonSchema schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+                .getSchema(Contracts.read(Contracts.TICK_V1));
+        var example = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(
+                Contracts.read("sprout/contracts/events/marketdata/tick.v1.example.json"));
+        assertThat(schema.validate(example.deepCopy().put("price", 0))).isNotEmpty();
+        assertThat(schema.validate(example.deepCopy().put("exchange", "NSE"))).isNotEmpty();
     }
 
     @Test
