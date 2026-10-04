@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Sprout Market Data API
-  version: 1.0.0
+  version: 1.0.1
   description: |
     Instruments, quotes, candles and a live price stream for Sprout.
 
@@ -10,11 +10,15 @@ info:
 
     **Where prices come from.** The service runs in one of three modes, shown by `GET /v1/market`:
 
-    - `REPLAY`: real recorded NSE trading days, played back as if live, optionally faster than real
-      time. Prices inside each minute are generated so that every minute's open, high, low, close and
-      volume match the recording exactly.
-    - `SYNTHETIC`: generated, deterministic prices for tests and CI, where recorded data isn't available.
-    - `LIVE`: a live feed (planned).
+    - `SYNTHETIC` (today's mode): a simulated market of fictional companies. Prices are generated,
+      deterministic for a given seed and date, and realistic: stocks move with the market and their
+      sector, open with overnight gaps, occasionally jump on news, and trade more at the open and close.
+      These are not real prices and the companies don't exist.
+    - `REPLAY` (planned): recorded trading days played back as if live.
+    - `LIVE` (planned): a live feed.
+
+    The market clock either follows real Indian time (open 09:15-15:30 IST on weekdays) or runs
+    accelerated, one session after another; `speed` in `GET /v1/market` says which.
 
     The service never reveals the future: quotes, candles and the stream only ever show what had
     happened by the current market time, in every mode.
@@ -154,8 +158,8 @@ paths:
       operationId: streamPrices
       summary: Live prices as Server-Sent Events
       description: |
-        A `text/event-stream` that stays open. On connect it sends one `quote` event per requested
-        symbol (the current state), then:
+        A `text/event-stream` that stays open. On connect it sends one `market` event and one `quote`
+        event per requested symbol (the current state), then:
 
         - `tick`: every price change, as a `Tick`.
         - `market`: whenever the market state changes (opens, closes, a new replay day), as a `Market`.
@@ -164,6 +168,9 @@ paths:
         **Slow clients get the latest price, not every price.** If a client can't keep up, the
         service sends only the most recent tick per symbol (conflation). `seq` then jumps; a jump
         means intermediate ticks were skipped, never that prices were wrong.
+
+        If the service falls behind (for example after the host was asleep) it skips ahead and sends a
+        fresh `market` event and `quote` events, exactly as on connect.
 
         Reconnecting starts again with fresh `quote` events. At most 50 symbols per stream.
       parameters:
