@@ -15,17 +15,18 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 
 ## Using it
 
-Releases are git tags, built by [JitPack](https://jitpack.io/#SaiNayakk/sprout-contracts). Add the repository and pin a version:
+Releases are git tags. Each one is built, tested and published to this repo's own Maven repository on
+GitHub Pages (no login needed to download). Add the repository and pin a version:
 
 ```xml
 <repositories>
-  <repository><id>jitpack.io</id><url>https://jitpack.io</url></repository>
+  <repository><id>sprout-contracts</id><url>https://sainayakk.github.io/sprout-contracts/maven</url></repository>
 </repositories>
 
 <dependency>
   <groupId>com.github.SaiNayakk</groupId>
   <artifactId>sprout-contracts</artifactId>
-  <version>v0.1.0</version>
+  <version>0.3.2</version>
 </dependency>
 ```
 
