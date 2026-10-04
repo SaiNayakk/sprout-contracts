@@ -37,8 +37,24 @@ class ContractsTest {
     }
 
     @Test
+    void moneySpecsParseWithoutErrors() {
+        Object[][] specs = {
+                {Contracts.ACCOUNTS_V1, new String[] {"/v1/accounts", "/v1/accounts/me"}},
+                {Contracts.LEDGER_V1, new String[] {"/v1/journal-entries", "/v1/accounts/{account}", "/v1/trial-balance"}},
+                {Contracts.PAYMENTS_V1, new String[] {"/v1/balance", "/v1/deposits", "/v1/withdrawals", "/internal/v1/bank-events"}},
+                {Contracts.BANK_V1, new String[] {"/v1/accounts", "/v1/requests/{id}/approve", "/partner/v1/collect-requests",
+                        "/partner/v1/payouts"}}};
+        for (Object[] spec : specs) {
+            SwaggerParseResult result = new OpenAPIV3Parser().readContents(Contracts.read((String) spec[0]));
+            assertThat(result.getMessages()).as((String) spec[0]).isEmpty();
+            assertThat(result.getOpenAPI().getPaths()).as((String) spec[0]).containsKeys((String[]) spec[1]);
+        }
+    }
+
+    @Test
     void everyOperationHasAnId() {
-        for (String spec : new String[] {Contracts.IDENTITY_V1, Contracts.MARKETDATA_V1}) {
+        for (String spec : new String[] {Contracts.IDENTITY_V1, Contracts.MARKETDATA_V1, Contracts.ACCOUNTS_V1,
+                Contracts.LEDGER_V1, Contracts.PAYMENTS_V1, Contracts.BANK_V1}) {
             var openApi = new OpenAPIV3Parser().readContents(Contracts.read(spec)).getOpenAPI();
             openApi.getPaths().forEach((path, item) -> item.readOperations()
                     .forEach(op -> assertThat(op.getOperationId()).as(spec + " " + path).isNotBlank()));

@@ -10,6 +10,10 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 |---|---|---|
 | Identity API v1 | `src/main/resources/sprout/contracts/openapi/identity-v1.yaml` | sprout-identity |
 | Market Data API v1 | `src/main/resources/sprout/contracts/openapi/marketdata-v1.yaml` | sprout-marketdata |
+| Accounts API v1 | `src/main/resources/sprout/contracts/openapi/accounts-v1.yaml` | sprout-accounts |
+| Ledger API v1 (internal) | `src/main/resources/sprout/contracts/openapi/ledger-v1.yaml` | sprout-ledger |
+| Payments API v1 | `src/main/resources/sprout/contracts/openapi/payments-v1.yaml` | sprout-payments |
+| Sprout Bank API v1 (simulated bank) | `src/main/resources/sprout/contracts/openapi/bank-v1.yaml` | sprout-bank |
 | `marketdata.tick` v1 | `src/main/resources/sprout/contracts/events/marketdata/tick.v1.schema.json` | sprout-marketdata |
 | `identity.user.registered` v1 | `src/main/resources/sprout/contracts/events/identity/user-registered.v1.schema.json` | sprout-identity |
 

@@ -1,0 +1,109 @@
+openapi: 3.0.3
+info:
+  title: Sprout Accounts API
+  version: 1.0.0
+  description: |
+    Opening a Sprout trading account: who the customer is (simulated KYC) and which bank account
+    their money comes from and goes back to.
+
+    Clients reach these endpoints through the gateway under `/api/accounts`. Every endpoint needs a
+    signed-in user; the account belongs to that user.
+
+    **KYC is simulated** but follows the real rules' shape: the customer must be 18 or older, give a
+    PAN in the right format for an individual (`AAAPA1234A`: five letters, the fourth `P`, four
+    digits, a letter), use a PAN no other account uses, and link a Sprout Bank UPI address that exists.
+    Errors use RFC 9457 problem details with a stable machine-readable `code`.
+servers:
+  - url: http://localhost:8100/api/accounts
+    description: Through the gateway
+paths:
+  /v1/accounts:
+    post:
+      operationId: openAccount
+      summary: Open my Sprout account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenAccountRequest' }
+      responses:
+        '201':
+          description: Opened and active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'This user already has an account (`ACCOUNT_EXISTS`), or the PAN is in use (`PAN_IN_USE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'KYC failed (`KYC_REJECTED`, with the reason), or the UPI address does not exist (`VPA_NOT_FOUND`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/accounts/me:
+    get:
+      operationId: getMyAccount
+      summary: My Sprout account
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: 'No account yet (`NO_ACCOUNT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    OpenAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [legalName, dateOfBirth, pan, bankVpa]
+      properties:
+        legalName: { type: string, minLength: 2, maxLength: 100, example: Asha Rao }
+        dateOfBirth: { type: string, format: date, example: '1999-04-12' }
+        pan: { type: string, example: ABCPR1234K, description: 'Upper or lower case; stored masked.' }
+        bankVpa: { type: string, example: asha@sproutbank, description: 'The Sprout Bank UPI address money moves to and from.' }
+    Account:
+      type: object
+      required: [id, userId, legalName, panMasked, bankVpa, status, openedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        legalName: { type: string }
+        panMasked: { type: string, example: 'XXXXX1234K' }
+        bankVpa: { type: string }
+        status: { type: string, enum: [ACTIVE] }
+        openedAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, ACCOUNT_EXISTS, PAN_IN_USE, KYC_REJECTED, VPA_NOT_FOUND, NO_ACCOUNT,
+                 RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

@@ -1,0 +1,247 @@
+openapi: 3.0.3
+info:
+  title: Sprout Payments API
+  version: 1.0.0
+  description: |
+    Moving money between a customer's Sprout Bank account and their Sprout account.
+
+    Clients reach these endpoints through the gateway under `/api/payments`. Every endpoint except the
+    bank's callback needs a signed-in user with an open Sprout account.
+
+    **Adding money** is a UPI collect request: Sprout asks the customer's bank for the money, the
+    customer approves it in the bank with their UPI PIN, the bank tells Sprout, and the money appears
+    in the customer's Sprout balance. Until then the deposit is `AWAITING_APPROVAL`; it can end
+    `COMPLETED`, `DECLINED` (the customer said no) or `EXPIRED` (nobody answered in time).
+
+    **Withdrawing** takes the amount out of the available balance at once (held), asks the bank to pay
+    it out, then settles; if the bank fails, the hold is released and the money is available again.
+
+    **Retries are safe.** `POST` requests need an `Idempotency-Key` header (any unique string, e.g. a
+    UUID); repeating a request with the same key returns the original result instead of moving money
+    twice. Amounts are decimal strings in rupees; each payment is between ₹1 and ₹1,00,000.
+servers:
+  - url: http://localhost:8100/api/payments
+    description: Through the gateway
+paths:
+  /v1/balance:
+    get:
+      operationId: getBalance
+      summary: My Sprout cash
+      responses:
+        '200':
+          description: Available to invest or withdraw, and on its way out.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, withdrawing]
+                properties:
+                  available: { $ref: '#/components/schemas/Amount' }
+                  withdrawing: { $ref: '#/components/schemas/Amount' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+  /v1/deposits:
+    post:
+      operationId: addMoney
+      summary: Add money from my bank (UPI collect)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoneyRequest' }
+      responses:
+        '201':
+          description: 'Asked the bank; approve it there with your UPI PIN.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deposit' }
+        '200':
+          description: The same Idempotency-Key was used before; the original deposit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deposit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listDeposits
+      summary: My deposits, newest first
+      responses:
+        '200':
+          description: Deposits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deposits]
+                properties:
+                  deposits: { type: array, items: { $ref: '#/components/schemas/Deposit' } }
+  /v1/deposits/{id}:
+    get:
+      operationId: getDeposit
+      summary: One of my deposits
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The deposit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deposit' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/withdrawals:
+    post:
+      operationId: withdraw
+      summary: Send money back to my bank
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MoneyRequest' }
+      responses:
+        '201':
+          description: 'Held and sent to the bank; `COMPLETED` when the bank has paid it.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Withdrawal' }
+        '200':
+          description: The same Idempotency-Key was used before; the original withdrawal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Withdrawal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '422':
+          description: 'More than the available balance (`INSUFFICIENT_FUNDS`). Nothing moved.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listWithdrawals
+      summary: My withdrawals, newest first
+      responses:
+        '200':
+          description: Withdrawals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [withdrawals]
+                properties:
+                  withdrawals: { type: array, items: { $ref: '#/components/schemas/Withdrawal' } }
+  /v1/withdrawals/{id}:
+    get:
+      operationId: getWithdrawal
+      summary: One of my withdrawals
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The withdrawal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Withdrawal' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/bank-events:
+    post:
+      operationId: receiveBankEvent
+      summary: Sprout Bank tells Sprout what happened to a collect request
+      description: |
+        Called by the bank, not by clients. The body is a `BankEvent` (see the Sprout Bank API) signed
+        with HMAC-SHA256 under the key Sprout and the bank share: header
+        `X-Bank-Signature: sha256=<hex of HMAC(body)>`. Unsigned or wrongly signed events are refused.
+        Events can arrive more than once and out of order; each is applied at most once.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '204': { description: 'Applied, or already applied.' }
+        '401':
+          description: 'Missing or wrong signature (`INVALID_SIGNATURE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: 'Couldn''t apply it now; the bank retries.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 100 }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 'No such deposit or withdrawal of yours (`NOT_FOUND`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+      example: '500.00'
+    MoneyRequest:
+      type: object
+      additionalProperties: false
+      required: [amount]
+      properties:
+        amount: { $ref: '#/components/schemas/Amount' }
+    Deposit:
+      type: object
+      required: [id, amount, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        status: { type: string, enum: [AWAITING_APPROVAL, COMPLETED, DECLINED, EXPIRED, FAILED] }
+        bankRequestId: { type: string, description: 'The collect request in Sprout Bank, to approve there.' }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Withdrawal:
+      type: object
+      required: [id, amount, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        status: { type: string, enum: [PROCESSING, COMPLETED, FAILED] }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, INSUFFICIENT_FUNDS, INVALID_SIGNATURE,
+                 RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

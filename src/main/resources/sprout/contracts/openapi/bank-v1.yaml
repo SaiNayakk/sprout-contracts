@@ -1,0 +1,351 @@
+openapi: 3.0.3
+info:
+  title: Sprout Bank API (simulated bank)
+  version: 1.0.0
+  description: |
+    **Sprout Bank is not part of Sprout.** It simulates the customer's own bank and its UPI app, so
+    money can move end to end. No real money exists here.
+
+    Two kinds of caller:
+
+    - **Customers** (through the gateway under `/api/bank`, signed in with their Sprout login; a real
+      bank would have its own): open an account with a starting balance of ₹1,00,000, set a UPI PIN,
+      see and approve or decline payment requests with that PIN, and see their transactions.
+    - **Partners** (Sprout's services, `/partner/...`), authenticated with the header
+      `X-Partner-Key`: check a UPI address exists, ask a customer for money (a collect request), and
+      pay money out.
+
+    **UPI PIN.** 4 or 6 digits, not all the same and not a simple sequence; stored hashed. Three wrong
+    PINs lock approvals for 15 minutes.
+
+    **Collect requests** wait for the customer for 5 minutes, then expire. Every outcome (approved,
+    declined, expired) is sent to the partner's callback as a `BankEvent`, signed with HMAC-SHA256
+    (`X-Bank-Signature: sha256=<hex>`), and retried until it is acknowledged.
+
+    Amounts are decimal strings in rupees.
+servers:
+  - url: http://localhost:8100/api/bank
+    description: Through the gateway (customers)
+  - url: http://localhost:8107
+    description: The bank, directly (partners)
+paths:
+  /v1/accounts:
+    post:
+      operationId: openBankAccount
+      summary: Open my Sprout Bank account and set my UPI PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenBankAccountRequest' }
+      responses:
+        '201':
+          description: Opened, with ₹1,00,000 to start.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankAccount' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/accounts/me:
+    get:
+      operationId: getMyBankAccount
+      summary: My bank account
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankAccount' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/requests:
+    get:
+      operationId: listRequests
+      summary: Payment requests to me, newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, DECLINED, EXPIRED] } }
+      responses:
+        '200':
+          description: Requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests: { type: array, items: { $ref: '#/components/schemas/CollectRequest' } }
+  /v1/requests/{id}/approve:
+    post:
+      operationId: approveRequest
+      summary: Pay a request, with my UPI PIN
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [upiPin]
+              properties:
+                upiPin: { type: string }
+      responses:
+        '200':
+          description: Paid.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectRequest' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'No longer pending (`REQUEST_NOT_PENDING`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Wrong PIN (`INVALID_PIN`, with attempts left) or not enough money (`INSUFFICIENT_BALANCE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: 'Too many wrong PINs; locked for a while (`PIN_LOCKED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/requests/{id}/decline:
+    post:
+      operationId: declineRequest
+      summary: Refuse a request
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Declined.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectRequest' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/transactions:
+    get:
+      operationId: listTransactions
+      summary: My bank statement, newest first
+      responses:
+        '200':
+          description: Transactions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transactions]
+                properties:
+                  transactions: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+  /app:
+    get:
+      operationId: bankApp
+      summary: The Sprout Bank web page
+      security: []
+      responses:
+        '200':
+          description: HTML.
+          content:
+            text/html:
+              schema: { type: string }
+  /partner/v1/vpas/{vpa}:
+    get:
+      operationId: lookUpVpa
+      summary: Does this UPI address exist, and whose is it?
+      security: [{ partnerKey: [] }]
+      parameters: [{ name: vpa, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: It exists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vpa, holderName]
+                properties:
+                  vpa: { type: string }
+                  holderName: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/collect-requests:
+    post:
+      operationId: createCollectRequest
+      summary: Ask a customer for money
+      security: [{ partnerKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [payerVpa, amount, reference, callbackUrl]
+              properties:
+                payerVpa: { type: string }
+                amount: { $ref: '#/components/schemas/Amount' }
+                reference: { type: string, maxLength: 120, description: 'The partner''s id for this payment. Unique: asking again with the same reference returns the same request.' }
+                note: { type: string, maxLength: 100 }
+                callbackUrl: { type: string, description: 'Where BankEvents for this request are sent.' }
+      responses:
+        '201':
+          description: Waiting for the customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectRequest' }
+        '200':
+          description: Already created with this reference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectRequest' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/collect-requests/{id}:
+    get:
+      operationId: getCollectRequest
+      summary: A collect request's status (for reconciliation)
+      security: [{ partnerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectRequest' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/payouts:
+    post:
+      operationId: payOut
+      summary: Pay money to a customer
+      security: [{ partnerKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [payeeVpa, amount, reference]
+              properties:
+                payeeVpa: { type: string }
+                amount: { $ref: '#/components/schemas/Amount' }
+                reference: { type: string, maxLength: 120, description: 'Unique per payout: paying again with the same reference returns the original payout.' }
+      responses:
+        '201':
+          description: Paid.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '200':
+          description: Already paid with this reference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /partner/v1/payouts/{reference}:
+    get:
+      operationId: getPayout
+      summary: A payout by its reference (for reconciliation)
+      security: [{ partnerKey: [] }]
+      parameters: [{ name: reference, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: The payout.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+    partnerKey: { type: apiKey, in: header, name: X-Partner-Key }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `INVALID_PARTNER_KEY`, `NOT_FOUND`, `ACCOUNT_EXISTS`, `WEAK_PIN`, `INSUFFICIENT_BALANCE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    OpenBankAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [holderName, upiPin]
+      properties:
+        holderName: { type: string, minLength: 2, maxLength: 100 }
+        upiPin: { type: string, pattern: '^([0-9]{4}|[0-9]{6})$' }
+    BankAccount:
+      type: object
+      required: [vpa, holderName, balance, openedAt]
+      properties:
+        vpa: { type: string, example: asha.rao@sproutbank }
+        holderName: { type: string }
+        balance: { $ref: '#/components/schemas/Amount' }
+        openedAt: { type: string, format: date-time }
+    CollectRequest:
+      type: object
+      required: [id, payerVpa, payeeVpa, payeeName, amount, status, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        payerVpa: { type: string }
+        payeeVpa: { type: string }
+        payeeName: { type: string, example: Sprout Investments }
+        amount: { $ref: '#/components/schemas/Amount' }
+        note: { type: string }
+        reference: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, DECLINED, EXPIRED] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+    Payout:
+      type: object
+      required: [id, payeeVpa, amount, reference, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        payeeVpa: { type: string }
+        amount: { $ref: '#/components/schemas/Amount' }
+        reference: { type: string }
+        status: { type: string, enum: [COMPLETED] }
+        createdAt: { type: string, format: date-time }
+    Transaction:
+      type: object
+      required: [id, amount, direction, description, balanceAfter, at]
+      properties:
+        id: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        direction: { type: string, enum: [IN, OUT] }
+        description: { type: string }
+        counterparty: { type: string }
+        balanceAfter: { $ref: '#/components/schemas/Amount' }
+        at: { type: string, format: date-time }
+    BankEvent:
+      type: object
+      description: Sent to a collect request's callbackUrl, signed. At least once; apply each eventId once.
+      required: [eventId, type, requestId, reference, amount, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        type: { type: string, enum: [COLLECT_APPROVED, COLLECT_DECLINED, COLLECT_EXPIRED] }
+        requestId: { type: string, format: uuid }
+        reference: { type: string }
+        amount: { $ref: '#/components/schemas/Amount' }
+        occurredAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, INVALID_PARTNER_KEY, NOT_FOUND, ACCOUNT_EXISTS, WEAK_PIN, INVALID_PIN,
+                 PIN_LOCKED, REQUEST_NOT_PENDING, INSUFFICIENT_BALANCE, UPSTREAM_UNAVAILABLE, RATE_LIMITED]
+        attemptsLeft: { type: integer }
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []
