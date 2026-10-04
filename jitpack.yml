@@ -1,2 +1,5 @@
 jdk:
   - openjdk21
+# Use the repository's own pinned Maven (mvnw), not JitPack's, whose install broke a build.
+install:
+  - ./mvnw -B -q install -DskipTests
