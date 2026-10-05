@@ -57,6 +57,31 @@ paths:
               schema: { $ref: '#/components/schemas/DematAccount' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
+  /participant/v1/holdings:
+    get:
+      operationId: listAllHoldings
+      summary: Every holding of all my clients (for reconciliation)
+      security: [{ participantKey: [] }]
+      responses:
+        '200':
+          description: Holdings above zero, by demat account and symbol.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holdings]
+                properties:
+                  holdings:
+                    type: array
+                    items:
+                      type: object
+                      required: [boId, clientRef, symbol, quantity]
+                      properties:
+                        boId: { type: string }
+                        clientRef: { type: string }
+                        symbol: { type: string }
+                        quantity: { type: integer }
+        '401': { $ref: '#/components/responses/Problem' }
   /participant/v1/accounts/{boId}:
     get:
       operationId: getDematAccount

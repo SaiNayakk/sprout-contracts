@@ -19,6 +19,8 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 | Sprout Depository API v1 (simulated depository) | `src/main/resources/sprout/contracts/openapi/depository-v1.yaml` | sprout-depository |
 | Sprout Clearing Corporation API v1 (simulated clearing corporation) | `src/main/resources/sprout/contracts/openapi/clearing-v1.yaml` | sprout-clearing |
 | Settlement API v1 (internal back office) | `src/main/resources/sprout/contracts/openapi/settlement-v1.yaml` | sprout-settlement |
+| Statements API v1 | `src/main/resources/sprout/contracts/openapi/statements-v1.yaml` | sprout-statements |
+| Reconciliation API v1 (internal) | `src/main/resources/sprout/contracts/openapi/recon-v1.yaml` | sprout-recon |
 | `marketdata.tick` v1 | `src/main/resources/sprout/contracts/events/marketdata/tick.v1.schema.json` | sprout-marketdata |
 | `identity.user.registered` v1 | `src/main/resources/sprout/contracts/events/identity/user-registered.v1.schema.json` | sprout-identity |
 

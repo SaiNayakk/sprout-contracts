@@ -1,0 +1,276 @@
+openapi: 3.0.3
+info:
+  title: Sprout Statements API
+  version: 1.0.0
+  description: |
+    A customer's records: what a broker must give them, and what they need at tax time.
+
+    Clients reach these endpoints through the gateway under `/api/statements`. Every endpoint needs a
+    signed-in user with an open Sprout account. Everything here is read-only and built from the
+    books (the order service's executions, the ledger, the depository); nothing is stored twice.
+
+    - **Contract notes**: for every day with trades, every execution and every charge, and what the day
+      comes to, as a broker must send by law.
+    - **Funds statement**: every movement of the customer's cash between two dates, with the balance
+      after each.
+    - **Profit and loss**: realised gains between two dates, split as Indian tax treats them: intraday
+      (speculative), short-term (shares held a year or less) and long-term. Shares are matched first in,
+      first out. Charges are shown beside, not deducted.
+    - **Holdings statement**: what the depository holds in the customer's demat account: the official
+      record of what they own.
+
+    Dates are in India time. Amounts are rupee strings.
+servers:
+  - url: http://localhost:8100/api/statements
+    description: Through the gateway
+paths:
+  /v1/contract-notes:
+    get:
+      operationId: listContractNotes
+      summary: My contract notes, newest first (the last 100 trading days with trades)
+      responses:
+        '200':
+          description: One per trade date.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contractNotes]
+                properties:
+                  contractNotes:
+                    type: array
+                    items:
+                      type: object
+                      required: [tradeDate, number, trades, net]
+                      properties:
+                        tradeDate: { type: string, format: date }
+                        number: { type: string }
+                        trades: { type: integer }
+                        net: { $ref: '#/components/schemas/SignedAmount' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/contract-notes/{tradeDate}:
+    get:
+      operationId: getContractNote
+      summary: One day's contract note
+      parameters:
+        - { name: tradeDate, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The contract note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractNote' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: 'No trades that day (`NOT_FOUND`), or no Sprout account (`NO_ACCOUNT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/funds-statement:
+    get:
+      operationId: getFundsStatement
+      summary: My cash between two dates
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+      responses:
+        '200':
+          description: The statement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FundsStatement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/pnl:
+    get:
+      operationId: getProfitAndLoss
+      summary: My realised profit and loss between two dates, as tax treats it
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+      responses:
+        '200':
+          description: The P&L.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfitAndLoss' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/holdings-statement:
+    get:
+      operationId: getHoldingsStatement
+      summary: What my demat account holds, according to the depository
+      responses:
+        '200':
+          description: The holdings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dematAccount, asOf, holdings]
+                properties:
+                  dematAccount: { type: string }
+                  asOf: { type: string, format: date-time }
+                  holdings:
+                    type: array
+                    items:
+                      type: object
+                      required: [symbol, quantity]
+                      properties:
+                        symbol: { type: string }
+                        quantity: { type: integer }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    From:
+      name: from
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: First day, inclusive.
+    To:
+      name: to
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: Last day, inclusive. At most a year after `from`.
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    SignedAmount:
+      type: string
+      pattern: '^-?[0-9]{1,13}(\.[0-9]{1,2})?$'
+    Charges:
+      type: object
+      required: [brokerage, stt, exchangeCharges, sebiFees, stampDuty, gst, total]
+      properties:
+        brokerage: { $ref: '#/components/schemas/Amount' }
+        stt: { $ref: '#/components/schemas/Amount' }
+        exchangeCharges: { $ref: '#/components/schemas/Amount' }
+        sebiFees: { $ref: '#/components/schemas/Amount' }
+        stampDuty: { $ref: '#/components/schemas/Amount' }
+        gst: { $ref: '#/components/schemas/Amount' }
+        total: { $ref: '#/components/schemas/Amount' }
+    ContractNote:
+      type: object
+      required: [number, tradeDate, broker, client, trades, charges, bought, sold, net]
+      properties:
+        number: { type: string, example: 'CN-20261005-5D1F2B8E' }
+        tradeDate: { type: string, format: date }
+        broker:
+          type: object
+          required: [name, registration]
+          properties:
+            name: { type: string }
+            registration: { type: string, description: 'A made-up registration number: Sprout is a simulation.' }
+        client:
+          type: object
+          required: [name, clientCode, panMasked]
+          properties:
+            name: { type: string }
+            clientCode: { type: string }
+            panMasked: { type: string }
+            dematAccount: { type: string }
+        trades:
+          type: array
+          items:
+            type: object
+            required: [orderId, executedAt, symbol, side, product, quantity, price, value, charges]
+            properties:
+              orderId: { type: string, format: uuid }
+              tradeId: { type: string, format: uuid }
+              executedAt: { type: string, format: date-time }
+              symbol: { type: string }
+              side: { type: string, enum: [BUY, SELL] }
+              product: { type: string, enum: [CNC, MIS] }
+              quantity: { type: integer }
+              price: { $ref: '#/components/schemas/Amount' }
+              value: { $ref: '#/components/schemas/Amount' }
+              charges: { $ref: '#/components/schemas/Amount' }
+        charges: { $ref: '#/components/schemas/Charges' }
+        bought: { $ref: '#/components/schemas/Amount' }
+        sold: { $ref: '#/components/schemas/Amount' }
+        net: { $ref: '#/components/schemas/SignedAmount', description: 'sold - bought - charges: positive is due to the client.' }
+    FundsStatement:
+      type: object
+      required: [from, to, openingBalance, closingBalance, lines]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        openingBalance: { $ref: '#/components/schemas/SignedAmount' }
+        closingBalance: { $ref: '#/components/schemas/SignedAmount' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [at, description, balance]
+            properties:
+              at: { type: string, format: date-time }
+              description: { type: string }
+              credit: { $ref: '#/components/schemas/Amount' }
+              debit: { $ref: '#/components/schemas/Amount' }
+              balance: { $ref: '#/components/schemas/SignedAmount' }
+    ProfitAndLoss:
+      type: object
+      required: [from, to, intraday, shortTerm, longTerm, total, charges, lines]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        intraday: { $ref: '#/components/schemas/SignedAmount' }
+        shortTerm: { $ref: '#/components/schemas/SignedAmount' }
+        longTerm: { $ref: '#/components/schemas/SignedAmount' }
+        total: { $ref: '#/components/schemas/SignedAmount' }
+        charges: { $ref: '#/components/schemas/Amount' }
+        lines:
+          type: array
+          description: One per sale matched to a purchase (FIFO), and one per intraday round trip.
+          items:
+            type: object
+            required: [symbol, category, quantity, buyDate, sellDate, buyValue, sellValue, pnl]
+            properties:
+              symbol: { type: string }
+              category: { type: string, enum: [INTRADAY, SHORT_TERM, LONG_TERM] }
+              quantity: { type: integer }
+              buyDate: { type: string, format: date }
+              sellDate: { type: string, format: date }
+              buyValue: { $ref: '#/components/schemas/Amount' }
+              sellValue: { $ref: '#/components/schemas/Amount' }
+              pnl: { $ref: '#/components/schemas/SignedAmount' }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

@@ -45,6 +45,12 @@ public final class Contracts {
     /** OpenAPI spec for Sprout's settlement back office (internal, and the clearing corporation's callback). */
     public static final String SETTLEMENT_V1 = "sprout/contracts/openapi/settlement-v1.yaml";
 
+    /** OpenAPI spec for the statements service: contract notes, funds statements, P&amp;L, holdings statements. */
+    public static final String STATEMENTS_V1 = "sprout/contracts/openapi/statements-v1.yaml";
+
+    /** OpenAPI spec for daily reconciliation (internal). */
+    public static final String RECON_V1 = "sprout/contracts/openapi/recon-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

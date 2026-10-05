@@ -76,6 +76,27 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /member/v1/trades:
+    get:
+      operationId: listMemberTrades
+      summary: My trades in a session, in execution order (for reconciliation)
+      security: [{ memberKey: [] }]
+      parameters:
+        - { name: sessionDate, in: query, required: true, schema: { type: string, format: date } }
+        - { name: after, in: query, required: false, schema: { type: string, format: uuid }, description: 'The last tradeId of the previous page.' }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        '200':
+          description: A page of my trades; fewer than `limit` means the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trades]
+                properties:
+                  trades: { type: array, items: { $ref: '#/components/schemas/MemberTrade' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
   /clearing/v1/trades:
     get:
       operationId: listTrades
@@ -198,6 +219,19 @@ components:
         tradeId: { type: string, format: uuid }
         reason: { type: string }
         occurredAt: { type: string, format: date-time }
+    MemberTrade:
+      type: object
+      required: [tradeId, clientOrderId, clientCode, symbol, side, quantity, price, sessionDate, executedAt]
+      properties:
+        tradeId: { type: string, format: uuid }
+        clientOrderId: { type: string }
+        clientCode: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        quantity: { type: integer }
+        price: { $ref: '#/components/schemas/Price' }
+        sessionDate: { type: string, format: date }
+        executedAt: { type: string, format: date-time }
     Trade:
       type: object
       required: [tradeId, member, clientCode, symbol, side, quantity, price, sessionDate, executedAt]

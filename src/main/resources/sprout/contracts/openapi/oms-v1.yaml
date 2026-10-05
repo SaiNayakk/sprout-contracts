@@ -183,6 +183,43 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /internal/v1/executions:
+    get:
+      operationId: listExecutions
+      summary: Executed orders between two trade dates (statements and reconciliation only)
+      description: Every executed order with a trade date from `from` to `to` (both inclusive), oldest first; for one customer with `userId`, or all.
+      security: [{ serviceKey: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: userId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The executions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [executions]
+                properties:
+                  executions: { type: array, items: { $ref: '#/components/schemas/Execution' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /internal/v1/recon:
+    get:
+      operationId: getReconView
+      summary: What the order service's books say each customer should have (reconciliation only)
+      description: |
+        Per customer: money that should be held for working orders and open positions, sale proceeds
+        that should still be unsettled, and delivered shares per symbol (held less T1).
+      security: [{ serviceKey: [] }]
+      responses:
+        '200':
+          description: The expected state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconView' }
+        '401': { $ref: '#/components/responses/Problem' }
   /internal/v1/settlements/{tradeDate}/summary:
     get:
       operationId: getSettlementSummary
@@ -387,6 +424,45 @@ components:
         blocked: { $ref: '#/components/schemas/Amount' }
         unsettled: { $ref: '#/components/schemas/Amount' }
         dues: { $ref: '#/components/schemas/Amount' }
+    Execution:
+      type: object
+      required: [orderId, userId, tradeDate, filledAt, symbol, side, product, quantity, price, value, charges, autoSquareOff]
+      properties:
+        orderId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        tradeId: { type: string, format: uuid }
+        tradeDate: { type: string, format: date }
+        filledAt: { type: string, format: date-time }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        product: { type: string, enum: [CNC, MIS] }
+        quantity: { type: integer }
+        price: { $ref: '#/components/schemas/Amount' }
+        value: { $ref: '#/components/schemas/Amount' }
+        charges: { $ref: '#/components/schemas/Charges' }
+        realisedPnl: { $ref: '#/components/schemas/SignedAmount' }
+        autoSquareOff: { type: boolean }
+    ReconView:
+      type: object
+      required: [customers]
+      properties:
+        customers:
+          type: array
+          items:
+            type: object
+            required: [userId, held, unsettled, delivered]
+            properties:
+              userId: { type: string, format: uuid }
+              held: { $ref: '#/components/schemas/Amount' }
+              unsettled: { $ref: '#/components/schemas/Amount' }
+              delivered:
+                type: array
+                items:
+                  type: object
+                  required: [symbol, quantity]
+                  properties:
+                    symbol: { type: string }
+                    quantity: { type: integer }
     SettlementSummary:
       type: object
       required: [tradeDate, payable, receivable, closeOuts, unpostedLedgerEntries, lines]
