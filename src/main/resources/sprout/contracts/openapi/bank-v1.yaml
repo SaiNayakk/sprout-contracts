@@ -245,6 +245,18 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /partner/v1/account:
+    get:
+      operationId: getPartnerAccount
+      summary: My own account and its balance (for reconciliation)
+      security: [{ partnerKey: [] }]
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankAccount' }
+        '401': { $ref: '#/components/responses/Problem' }
   /partner/v1/transactions:
     get:
       operationId: getPartnerStatement

@@ -97,6 +97,46 @@ paths:
                   entries:
                     type: array
                     items: { $ref: '#/components/schemas/JournalEntry' }
+  /v1/accounts/{account}/statement:
+    get:
+      operationId: getStatement
+      summary: An account's movements between two dates, with opening and closing balances
+      description: |
+        Every posting to the account from `from` (inclusive) to `to` (exclusive), oldest first, each
+        with the balance after it, and the balance before the first. Dates are in India time. At most
+        1000 lines; `complete: false` means there were more (ask again from the last line's date).
+      parameters:
+        - { name: account, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The statement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Statement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/balances:
+    get:
+      operationId: listBalances
+      summary: Balances of every account matching a pattern (for reconciliation)
+      description: |
+        `pattern` is an account name with `*` standing for one part, e.g. `customer:*:order-hold`.
+        Only accounts that have ever been posted to appear.
+      parameters:
+        - { name: pattern, in: query, required: true, schema: { type: string, example: 'customer:*:order-hold' } }
+      responses:
+        '200':
+          description: The balances, by account name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balances]
+                properties:
+                  balances: { type: array, items: { $ref: '#/components/schemas/Balance' } }
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/trial-balance:
     get:
       operationId: trialBalance
@@ -159,6 +199,32 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Posting' }
         postedAt: { type: string, format: date-time }
+    Statement:
+      type: object
+      required: [account, from, to, openingBalance, closingBalance, lines, complete]
+      properties:
+        account: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        openingBalance: { $ref: '#/components/schemas/SignedAmount' }
+        closingBalance: { $ref: '#/components/schemas/SignedAmount' }
+        complete: { type: boolean }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [entryId, postedAt, description, side, amount, balanceAfter]
+            properties:
+              entryId: { type: string, format: uuid }
+              postedAt: { type: string, format: date-time }
+              description: { type: string }
+              reference: { type: string }
+              side: { type: string, enum: [DEBIT, CREDIT] }
+              amount: { $ref: '#/components/schemas/Amount' }
+              balanceAfter: { $ref: '#/components/schemas/SignedAmount' }
+    SignedAmount:
+      type: string
+      pattern: '^-?[0-9]{1,13}(\.[0-9]{1,2})?$'
     Balance:
       type: object
       required: [account, kind, balance]

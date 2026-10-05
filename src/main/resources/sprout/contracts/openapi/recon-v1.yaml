@@ -1,0 +1,115 @@
+openapi: 3.0.3
+info:
+  title: Sprout Reconciliation API (internal)
+  version: 1.0.0
+  description: |
+    Sprout's daily reconciliation: every record that should agree with another is compared, and any
+    difference is a break for a person to look at. Internal only (operators and services, with
+    `X-Service-Key`); the gateway never routes here.
+
+    A run happens by itself once each new trading session has begun (after the previous day has had
+    time to settle), and on demand. Each run checks:
+
+    | Check | Compares |
+    |---|---|
+    | `LEDGER_BALANCED` | the ledger's assets and liabilities |
+    | `BANK_MATCHES_LEDGER` | the ledger's `sprout:bank` and Sprout's account at Sprout Bank |
+    | `HOLDS_MATCH_ORDERS` | each customer's money held in the ledger, and their working orders and open positions |
+    | `UNSETTLED_MATCHES_ORDERS` | each customer's unsettled money in the ledger, and their sales not yet settled |
+    | `TRADES_MATCH_EXCHANGE` | the order service's executions and the exchange's trades, for recent sessions |
+    | `DEMAT_MATCHES_HOLDINGS` | what the depository holds for each customer, and their delivered holdings |
+    | `SETTLEMENTS_HEALTHY` | no settlement is a break, or still open more than a day after its trade date |
+
+    Every check is `PASS` or `FAIL` with the differences it found (at most 20 listed), or `ERROR` if a
+    record couldn't be read.
+servers:
+  - url: http://localhost:8114
+    description: Reconciliation (operators and services)
+paths:
+  /v1/runs:
+    post:
+      operationId: startRun
+      summary: Reconcile now
+      security: [{ serviceKey: [] }]
+      responses:
+        '201':
+          description: The finished run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '401': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listRuns
+      summary: Recent runs, newest first (at most 30)
+      security: [{ serviceKey: [] }]
+      responses:
+        '200':
+          description: Runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runs]
+                properties:
+                  runs: { type: array, items: { $ref: '#/components/schemas/Run' } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/runs/{id}:
+    get:
+      operationId: getRun
+      summary: One run, with every check
+      security: [{ serviceKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    serviceKey: { type: apiKey, in: header, name: X-Service-Key }
+  responses:
+    Problem:
+      description: 'A problem: `UNAUTHENTICATED` or `NOT_FOUND`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Run:
+      type: object
+      required: [id, trigger, status, startedAt, checks]
+      properties:
+        id: { type: string, format: uuid }
+        trigger: { type: string, enum: [SCHEDULED, ON_DEMAND] }
+        session: { type: string, format: date, description: 'The session that had begun when it ran.' }
+        status: { type: string, enum: [PASS, FAIL, ERROR], description: 'FAIL if any check failed; ERROR if none failed but one couldn''t run.' }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        checks:
+          type: array
+          items:
+            type: object
+            required: [check, status, summary]
+            properties:
+              check:
+                type: string
+                enum: [LEDGER_BALANCED, BANK_MATCHES_LEDGER, HOLDS_MATCH_ORDERS, UNSETTLED_MATCHES_ORDERS, TRADES_MATCH_EXCHANGE,
+                       DEMAT_MATCHES_HOLDINGS, SETTLEMENTS_HEALTHY]
+              status: { type: string, enum: [PASS, FAIL, ERROR] }
+              summary: { type: string }
+              differences: { type: array, items: { type: string } }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }

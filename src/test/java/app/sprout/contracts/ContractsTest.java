@@ -80,6 +80,24 @@ class ContractsTest {
     }
 
     @Test
+    void recordsSpecsParseWithoutErrors() {
+        Object[][] specs = {
+                {Contracts.STATEMENTS_V1, new String[] {"/v1/contract-notes", "/v1/contract-notes/{tradeDate}", "/v1/funds-statement", "/v1/pnl",
+                        "/v1/holdings-statement"}},
+                {Contracts.RECON_V1, new String[] {"/v1/runs", "/v1/runs/{id}"}},
+                {Contracts.LEDGER_V1, new String[] {"/v1/accounts/{account}/statement", "/v1/balances"}},
+                {Contracts.OMS_V1, new String[] {"/internal/v1/executions", "/internal/v1/recon"}},
+                {Contracts.EXCHANGE_V1, new String[] {"/member/v1/trades"}},
+                {Contracts.DEPOSITORY_V1, new String[] {"/participant/v1/holdings"}},
+                {Contracts.BANK_V1, new String[] {"/partner/v1/account"}}};
+        for (Object[] spec : specs) {
+            SwaggerParseResult result = new OpenAPIV3Parser().readContents(Contracts.read((String) spec[0]));
+            assertThat(result.getMessages()).as((String) spec[0]).isEmpty();
+            assertThat(result.getOpenAPI().getPaths()).as((String) spec[0]).containsKeys((String[]) spec[1]);
+        }
+    }
+
+    @Test
     void everyOperationHasAnId() {
         for (String spec : new String[] {Contracts.IDENTITY_V1, Contracts.MARKETDATA_V1, Contracts.ACCOUNTS_V1,
                 Contracts.LEDGER_V1, Contracts.PAYMENTS_V1, Contracts.BANK_V1}) {
