@@ -237,12 +237,26 @@ components:
         createdAt: { type: string, format: date-time }
         reachedAt: { type: string, format: date-time }
     PotDetail:
-      allOf:
-        - { $ref: '#/components/schemas/Pot' }
-        - type: object
-          required: [movements]
-          properties:
-            movements: { type: array, items: { $ref: '#/components/schemas/Movement' } }
+      description: A pot with everything that went into it.
+      type: object
+      required: [id, name, symbol, target, status, saved, invested, quantity, value, uninvested, progressPercent, createdAt, movements]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        symbol: { type: string }
+        target: { $ref: '#/components/schemas/Amount' }
+        targetDate: { type: string, format: date }
+        status: { type: string, enum: [OPEN, REACHED, CLOSED] }
+        saved: { $ref: '#/components/schemas/Amount', description: 'Everything put in: contributions and round-up sweeps.' }
+        invested: { $ref: '#/components/schemas/Amount', description: 'What its shares cost, with charges.' }
+        quantity: { type: integer, description: 'Shares bought for this pot.' }
+        value: { $ref: '#/components/schemas/Amount', description: 'Its shares at the last price.' }
+        uninvested: { $ref: '#/components/schemas/Amount', description: 'Put in but not yet a whole share.' }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        monthlyNeeded: { $ref: '#/components/schemas/Amount', description: 'With a target date: what to put in each month from now to reach it.' }
+        createdAt: { type: string, format: date-time }
+        reachedAt: { type: string, format: date-time }
+        movements: { type: array, items: { $ref: '#/components/schemas/Movement' } }
     Movement:
       type: object
       description: 'Money into a pot (`CONTRIBUTION`, `ROUND_UPS`), or a buy of its share with it (`PURCHASE`).'
