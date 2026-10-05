@@ -427,6 +427,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MandateDebit' }
+        '400':
+          description: 'Above the mandate''s limit, or not a valid amount (`VALIDATION_FAILED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
@@ -435,7 +440,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '422':
-          description: 'Above the mandate''s limit (`VALIDATION_FAILED`) or not enough money (`INSUFFICIENT_BALANCE`).'
+          description: 'Not enough money (`INSUFFICIENT_BALANCE`).'
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
