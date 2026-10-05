@@ -21,6 +21,8 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 | Settlement API v1 (internal back office) | `src/main/resources/sprout/contracts/openapi/settlement-v1.yaml` | sprout-settlement |
 | Statements API v1 | `src/main/resources/sprout/contracts/openapi/statements-v1.yaml` | sprout-statements |
 | Reconciliation API v1 (internal) | `src/main/resources/sprout/contracts/openapi/recon-v1.yaml` | sprout-recon |
+| Plans API v1 (SIPs) | `src/main/resources/sprout/contracts/openapi/plans-v1.yaml` | sprout-plans |
+| Habits API v1 | `src/main/resources/sprout/contracts/openapi/habits-v1.yaml` | sprout-habits |
 | `marketdata.tick` v1 | `src/main/resources/sprout/contracts/events/marketdata/tick.v1.schema.json` | sprout-marketdata |
 | `identity.user.registered` v1 | `src/main/resources/sprout/contracts/events/identity/user-registered.v1.schema.json` | sprout-identity |
 

@@ -1,0 +1,342 @@
+openapi: 3.0.3
+info:
+  title: Sprout Habits API
+  version: 1.0.0
+  description: |
+    Sprout rewards investing regularly, never trading often. "Grow the habit, not the hype."
+
+    Clients reach these endpoints through the gateway under `/api/habits`. Every endpoint needs a
+    signed-in user; the habit ones need an open Sprout account.
+
+    **Everything is worked out from what the customer actually did** (their executed orders), each time
+    it's asked for, so it can't drift from their trading history:
+
+    - **Streak**: consecutive months with at least one delivery purchase. Selling doesn't break it;
+      intraday trading doesn't count towards it. Every 6 months of streak earns a **freeze** (at most
+      2 held), used up automatically on a month with no purchase so one missed month doesn't end it.
+      The streak is **at risk** after the 20th of a month with no purchase yet.
+    - **Level**: by the number of months with a purchase: Seedling, Sapling, Young tree, Grove, Forest.
+    - **Badges** for milestones: first investment, 3, 6 and 12 month streaks, five different shares
+      held, a plan's instalment, and a purchase kept for a year.
+    - **Points**: 100 for each month with a purchase, 50 more for each plan instalment. They **vest
+      after 30 days** if the shares bought aren't sold in that time; sold sooner, they're forfeited.
+    - **A nudge, not a ban**: more than 20 intraday or sell trades in the last 5 sessions shows a
+      cool-off nudge (`OVERTRADING`). Nothing is blocked.
+
+    **Squads** are private groups of friends who join with an invite code. A squad ranks its members by
+    the habit (streak, then months invested in the last 12), never by how much they have. A member
+    can choose to show a range for how much they've invested (e.g. "₹10,000 to ₹50,000"), never the
+    amount.
+
+    **Readiness**: before a first investment, a short check (emergency fund, high-interest debt,
+    horizon) with plain advice. Advice only: nothing is blocked.
+servers:
+  - url: http://localhost:8100/api/habits
+    description: Through the gateway
+paths:
+  /v1/habits/me:
+    get:
+      operationId: getMyHabits
+      summary: My streak, level, badges, points and any nudge
+      responses:
+        '200':
+          description: The habit picture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Habits' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/habits/me/privacy:
+    put:
+      operationId: setPrivacy
+      summary: Whether squads see a range for how much I've invested
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [showInvestedRange]
+              properties:
+                showInvestedRange: { type: boolean }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [showInvestedRange]
+                properties:
+                  showInvestedRange: { type: boolean }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/future:
+    get:
+      operationId: projectFuture
+      summary: '"Future You": what a monthly amount could grow to'
+      description: Compounded monthly at three illustrative yearly rates (6%, 10% and 12%). An illustration, not a promise.
+      parameters:
+        - { name: monthly, in: query, required: true, schema: { type: string, pattern: '^[0-9]{1,9}(\.[0-9]{1,2})?$' } }
+        - { name: years, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 40 } }
+      responses:
+        '200':
+          description: The projection, year by year.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Projection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/readiness:
+    put:
+      operationId: checkReadiness
+      summary: Am I ready to invest?
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [emergencyFundMonths, highInterestDebt, horizonYears]
+              properties:
+                emergencyFundMonths: { type: integer, minimum: 0, maximum: 120, description: 'Months of expenses saved for emergencies.' }
+                highInterestDebt: { type: boolean, description: 'Credit card or personal loan debt.' }
+                horizonYears: { type: integer, minimum: 0, maximum: 60, description: 'When the money will be needed.' }
+      responses:
+        '200':
+          description: The answer, with advice; kept as my latest.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getReadiness
+      summary: My latest readiness check
+      responses:
+        '200':
+          description: The latest check.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/squads:
+    post:
+      operationId: createSquad
+      summary: Start a squad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, nickname]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 40 }
+                nickname: { type: string, minLength: 2, maxLength: 24, description: 'How the squad sees me.' }
+      responses:
+        '201':
+          description: Started; share the invite code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Squad' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+    get:
+      operationId: listSquads
+      summary: The squads I'm in
+      responses:
+        '200':
+          description: Squads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [squads]
+                properties:
+                  squads: { type: array, items: { $ref: '#/components/schemas/Squad' } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/squads/join:
+    post:
+      operationId: joinSquad
+      summary: Join a squad with its invite code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [inviteCode, nickname]
+              properties:
+                inviteCode: { type: string }
+                nickname: { type: string, minLength: 2, maxLength: 24 }
+      responses:
+        '200':
+          description: Joined (or already a member).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Squad' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: 'No squad has that code (`NOT_FOUND`), or no Sprout account (`NO_ACCOUNT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: 'The squad is full: 12 members (`SQUAD_FULL`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/squads/{id}:
+    get:
+      operationId: getSquad
+      summary: A squad I'm in, members ranked by the habit
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The squad and its board.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Squad' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/squads/{id}/leave:
+    post:
+      operationId: leaveSquad
+      summary: Leave a squad
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '204': { description: 'Left.' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 'Not found, or not yours (`NOT_FOUND`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    Habits:
+      type: object
+      required: [streak, level, badges, points]
+      properties:
+        streak:
+          type: object
+          required: [months, longest, freezes, atRisk]
+          properties:
+            months: { type: integer }
+            longest: { type: integer }
+            freezes: { type: integer }
+            atRisk: { type: boolean }
+        level:
+          type: object
+          required: [name, monthsInvested]
+          properties:
+            name: { type: string, enum: [Seedling, Sapling, Young tree, Grove, Forest] }
+            monthsInvested: { type: integer }
+            nextName: { type: string }
+            monthsToNext: { type: integer }
+        badges:
+          type: array
+          items:
+            type: object
+            required: [code, name, earnedOn]
+            properties:
+              code: { type: string, enum: [FIRST_INVESTMENT, STREAK_3, STREAK_6, STREAK_12, FIVE_SHARES, FIRST_PLAN_INSTALMENT, HELD_A_YEAR] }
+              name: { type: string }
+              earnedOn: { type: string, format: date }
+        points:
+          type: object
+          required: [vested, pending, forfeited]
+          properties:
+            vested: { type: integer }
+            pending: { type: integer }
+            forfeited: { type: integer }
+        nudge:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [OVERTRADING] }
+            message: { type: string }
+    Projection:
+      type: object
+      required: [monthly, years, invested, rates]
+      properties:
+        monthly: { $ref: '#/components/schemas/Amount' }
+        years: { type: integer }
+        invested: { $ref: '#/components/schemas/Amount' }
+        rates:
+          type: array
+          items:
+            type: object
+            required: [yearlyRatePercent, finalValue, byYear]
+            properties:
+              yearlyRatePercent: { type: integer }
+              finalValue: { $ref: '#/components/schemas/Amount' }
+              byYear: { type: array, items: { $ref: '#/components/schemas/Amount' } }
+    Readiness:
+      type: object
+      required: [ready, advice, checkedAt]
+      properties:
+        ready: { type: boolean }
+        advice: { type: array, items: { type: string } }
+        checkedAt: { type: string, format: date-time }
+    Squad:
+      type: object
+      required: [id, name, inviteCode, members]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        inviteCode: { type: string }
+        members:
+          type: array
+          description: Ranked by streak, then months invested in the last 12. Present only for a single squad.
+          items:
+            type: object
+            required: [rank, nickname, streakMonths, monthsInvestedLast12, you]
+            properties:
+              rank: { type: integer }
+              nickname: { type: string }
+              streakMonths: { type: integer }
+              monthsInvestedLast12: { type: integer }
+              investedRange: { type: string, description: 'Only if the member chose to show it.' }
+              you: { type: boolean }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, SQUAD_FULL, RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []
