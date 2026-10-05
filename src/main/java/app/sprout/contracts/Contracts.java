@@ -51,6 +51,12 @@ public final class Contracts {
     /** OpenAPI spec for daily reconciliation (internal). */
     public static final String RECON_V1 = "sprout/contracts/openapi/recon-v1.yaml";
 
+    /** OpenAPI spec for systematic investment plans (SIPs). */
+    public static final String PLANS_V1 = "sprout/contracts/openapi/plans-v1.yaml";
+
+    /** OpenAPI spec for habits: streaks, levels, badges, points, squads, readiness, Future You. */
+    public static final String HABITS_V1 = "sprout/contracts/openapi/habits-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

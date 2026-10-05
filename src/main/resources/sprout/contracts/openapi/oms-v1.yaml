@@ -183,6 +183,51 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /internal/v1/orders:
+    post:
+      operationId: placeOrderForCustomer
+      summary: Place an order on a customer's behalf (Sprout's services only, e.g. a plan's instalment)
+      description: |
+        The same order, checks and charges as the customer's own, for `userId`, marked with `tag` so it
+        can be told apart (e.g. `sip:<planId>`). `Idempotency-Key` makes repeating it safe.
+      security: [{ serviceKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, symbol, side, quantity, orderType, product, tag]
+              properties:
+                userId: { type: string, format: uuid }
+                symbol: { type: string }
+                side: { type: string, enum: [BUY, SELL] }
+                quantity: { type: integer, minimum: 1, maximum: 100000 }
+                orderType: { type: string, enum: [MARKET, LIMIT] }
+                limitPrice: { $ref: '#/components/schemas/Amount' }
+                product: { type: string, enum: [CNC, MIS] }
+                tag: { type: string, pattern: '^[a-z]{2,10}:[A-Za-z0-9-]{1,80}$' }
+      responses:
+        '201':
+          description: Placed (it may be REJECTED, as a customer's would be).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '200':
+          description: The same Idempotency-Key was used before; the original order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '422':
+          description: 'No tradable share by that name (`UNKNOWN_INSTRUMENT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /internal/v1/executions:
     get:
       operationId: listExecutions
@@ -377,6 +422,7 @@ components:
         charges: { $ref: '#/components/schemas/Charges' }
         realisedPnl: { $ref: '#/components/schemas/SignedAmount' }
         autoSquareOff: { type: boolean, description: 'Placed by Sprout to close an intraday position.' }
+        tag: { type: string, description: 'Set on orders a Sprout service placed for the customer, e.g. a plan''s instalment (sip:<planId>).' }
         rejection:
           type: object
           required: [code, message]
@@ -442,6 +488,7 @@ components:
         charges: { $ref: '#/components/schemas/Charges' }
         realisedPnl: { $ref: '#/components/schemas/SignedAmount' }
         autoSquareOff: { type: boolean }
+        tag: { type: string }
     ReconView:
       type: object
       required: [customers]

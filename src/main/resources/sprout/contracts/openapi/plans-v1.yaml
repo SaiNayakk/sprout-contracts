@@ -1,0 +1,196 @@
+openapi: 3.0.3
+info:
+  title: Sprout Plans API (systematic investment plans)
+  version: 1.0.0
+  description: |
+    Systematic investment plans (SIPs): a fixed amount into a share every month, on the day the
+    customer chooses. The habit Sprout is built to grow is investing regularly, and this is how.
+
+    Clients reach these endpoints through the gateway under `/api/plans`. Every endpoint needs a
+    signed-in user with an open Sprout account.
+
+    **An instalment** is a delivery market buy of as many whole shares as the amount covers at the
+    price then, placed through the order service like any other order (same checks, same charges).
+    Each plan makes at most one instalment a month: on its day, or the first trading session after it.
+    A month whose instalment couldn't be placed (not enough money, the amount below one share's price)
+    is recorded as `SKIPPED` with the reason, never retried later in the month without the customer.
+
+    **Starting now.** A new plan normally makes its first instalment on its next day; with
+    `startNow: true` the first instalment is made at once (in the next open session).
+
+    At most 10 active plans; each is ₹100 to ₹1,00,000 a month, on days 1 to 28.
+servers:
+  - url: http://localhost:8100/api/plans
+    description: Through the gateway
+paths:
+  /v1/plans:
+    post:
+      operationId: createPlan
+      summary: Start a plan
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [symbol, amount, dayOfMonth]
+              properties:
+                symbol: { type: string, example: HARBOR }
+                amount: { $ref: '#/components/schemas/Amount' }
+                dayOfMonth: { type: integer, minimum: 1, maximum: 28 }
+                startNow: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '200':
+          description: The same Idempotency-Key was used before; the original plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '422':
+          description: 'No tradable share by that name (`UNKNOWN_INSTRUMENT`), or already 10 active plans (`TOO_MANY_PLANS`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listPlans
+      summary: My plans
+      responses:
+        '200':
+          description: Plans, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/plans/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    get:
+      operationId: getPlan
+      summary: One of my plans, with every instalment
+      responses:
+        '200':
+          description: The plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: cancelPlan
+      summary: Stop a plan for good (its instalments stay on record)
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/plans/{id}/pause:
+    post:
+      operationId: pausePlan
+      summary: Pause a plan (no instalments until resumed)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Paused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/NotActive' }
+  /v1/plans/{id}/resume:
+    post:
+      operationId: resumePlan
+      summary: Resume a paused plan
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Resumed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/NotActive' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 'No such plan of yours (`NOT_FOUND`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotActive:
+      description: 'It can''t be done in the plan''s state (`PLAN_STATE`): e.g. resuming a cancelled plan.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    Plan:
+      type: object
+      required: [id, symbol, amount, dayOfMonth, status, createdAt, instalments]
+      properties:
+        id: { type: string, format: uuid }
+        symbol: { type: string }
+        amount: { $ref: '#/components/schemas/Amount' }
+        dayOfMonth: { type: integer }
+        status: { type: string, enum: [ACTIVE, PAUSED, CANCELLED] }
+        nextDue: { type: string, format: date, description: 'When the next instalment is due (active plans).' }
+        invested: { $ref: '#/components/schemas/Amount' }
+        createdAt: { type: string, format: date-time }
+        instalments:
+          type: array
+          description: Newest first.
+          items:
+            type: object
+            required: [month, status, at]
+            properties:
+              month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+              status: { type: string, enum: [PLACED, FILLED, SKIPPED] }
+              orderId: { type: string, format: uuid }
+              quantity: { type: integer }
+              price: { $ref: '#/components/schemas/Amount' }
+              reason: { type: string }
+              at: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, UNKNOWN_INSTRUMENT, TOO_MANY_PLANS, PLAN_STATE, RATE_LIMITED,
+                 UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []
