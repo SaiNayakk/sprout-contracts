@@ -1,0 +1,216 @@
+openapi: 3.0.3
+info:
+  title: Sprout Rewards API (the vault and referrals)
+  version: 1.0.0
+  description: |
+    What a customer's habit points buy, and rewards for bringing friends who invest.
+
+    Clients reach these endpoints through the gateway under `/api/rewards`. Every endpoint needs a
+    signed-in user with an open Sprout account.
+
+    **Points come from the habit.** The points a customer has to spend are their **vested** habit points
+    (see the Habits API: earned by investing month after month, kept only if the money stays invested),
+    plus referral rewards, less what they have already spent. Pending points can't be spent yet.
+
+    **The vault** offers vouchers from fictional brands (the demo has no real partners) and app themes.
+    Redeeming takes the points at once and gives a voucher code; repeating a redemption with the same
+    `Idempotency-Key` returns the first one instead of spending twice.
+
+    **Referrals.** Each customer has a code. A new customer can enter a friend's code within 30 days of
+    opening their account (once, and never their own). Nothing is rewarded for signing up: once the
+    new customer has invested in **3 different months**, both of them get 500 points. That rewards the
+    habit, not the sign-up.
+servers:
+  - url: http://localhost:8100/api/rewards
+    description: Through the gateway
+paths:
+  /v1/vault:
+    get:
+      operationId: getVault
+      summary: What I can spend, and what's in the vault
+      responses:
+        '200':
+          description: The vault.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vault' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/redemptions:
+    get:
+      operationId: listRedemptions
+      summary: What I've redeemed, newest first
+      responses:
+        '200':
+          description: Redemptions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redemptions]
+                properties:
+                  redemptions: { type: array, items: { $ref: '#/components/schemas/Redemption' } }
+    post:
+      operationId: redeem
+      summary: Spend points on something in the vault
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [itemCode]
+              properties:
+                itemCode: { type: string, example: MONSOON_CHAI_50 }
+      responses:
+        '201':
+          description: Redeemed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Redemption' }
+        '200':
+          description: Already redeemed with this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Redemption' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: 'No such item in the vault (`NOT_FOUND`), or no Sprout account (`NO_ACCOUNT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Not enough points to spend (`NOT_ENOUGH_POINTS`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/referrals/me:
+    get:
+      operationId: getMyReferrals
+      summary: My referral code, the friends I brought, and what it earned
+      responses:
+        '200':
+          description: Referrals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Referrals' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/referrals/claim:
+    post:
+      operationId: claimReferral
+      summary: Say a friend brought me (within 30 days of opening my account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, example: SPR-7K2Q9M }
+      responses:
+        '200':
+          description: Linked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Referrals' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '409':
+          description: 'A friend is already linked (`ALREADY_REFERRED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Not a code that can be used: unknown, my own, or my account is over 30 days old (`INVALID_REFERRAL`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Balance:
+      type: object
+      required: [habitPoints, referralPoints, spent, available, pending]
+      properties:
+        habitPoints: { type: integer, description: 'Vested habit points.' }
+        referralPoints: { type: integer }
+        spent: { type: integer }
+        available: { type: integer, description: 'What can be spent now.' }
+        pending: { type: integer, description: 'Habit points not vested yet.' }
+    Item:
+      type: object
+      required: [code, name, brand, kind, points, affordable]
+      properties:
+        code: { type: string }
+        name: { type: string, example: '₹50 at Monsoon Chai' }
+        brand: { type: string, description: 'A fictional brand.' }
+        kind: { type: string, enum: [VOUCHER, THEME, DONATION] }
+        points: { type: integer }
+        affordable: { type: boolean }
+    Vault:
+      type: object
+      required: [balance, items]
+      properties:
+        balance: { $ref: '#/components/schemas/Balance' }
+        items: { type: array, items: { $ref: '#/components/schemas/Item' } }
+    Redemption:
+      type: object
+      required: [id, itemCode, name, points, at]
+      properties:
+        id: { type: string, format: uuid }
+        itemCode: { type: string }
+        name: { type: string }
+        points: { type: integer }
+        voucherCode: { type: string, description: 'For vouchers: the code to use (fictional).' }
+        at: { type: string, format: date-time }
+    Referrals:
+      type: object
+      required: [code, friends, pointsEarned]
+      properties:
+        code: { type: string, description: 'My code, for friends to enter.' }
+        referredBy: { type: string, description: 'The code I entered, if any.' }
+        friends:
+          type: array
+          items:
+            type: object
+            required: [joinedOn, monthsInvested, rewarded]
+            properties:
+              joinedOn: { type: string, format: date }
+              monthsInvested: { type: integer, description: 'Out of the 3 needed.' }
+              rewarded: { type: boolean }
+        pointsEarned: { type: integer }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, NOT_ENOUGH_POINTS, ALREADY_REFERRED, INVALID_REFERRAL,
+                 RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []
