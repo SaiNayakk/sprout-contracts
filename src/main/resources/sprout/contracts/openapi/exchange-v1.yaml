@@ -24,9 +24,10 @@ info:
     **Prices** are rupee strings. A limit price must be a multiple of the instrument's tick size and
     within the day's price band: 20% either side of the previous close.
 
-    **Clients.** Every order carries the member's `clientCode` for the customer it is for (a unique
+    **Clients.** An order should carry the member's `clientCode` for the customer it is for (a unique
     client code, as real exchanges require), so the clearing corporation can settle shares to that
-    customer's demat account.
+    customer's demat account. An order without one is the member's own (proprietary) trade, recorded
+    with the client code `PRO`.
 
     **Idempotent.** The member's `clientOrderId` names the order. Sending the same order again
     returns it (`200`); a different order under the same id is refused (`409`).
@@ -149,10 +150,10 @@ components:
     NewOrder:
       type: object
       additionalProperties: false
-      required: [clientOrderId, clientCode, symbol, side, type, quantity]
+      required: [clientOrderId, symbol, side, type, quantity]
       properties:
         clientOrderId: { type: string, minLength: 1, maxLength: 64 }
-        clientCode: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$', description: 'The member''s code for the customer this order is for.' }
+        clientCode: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$', description: 'The member''s code for the customer this order is for; without it, PRO (the member''s own trade).' }
         symbol: { type: string, example: HARBOR }
         side: { type: string, enum: [BUY, SELL] }
         type: { type: string, enum: [MARKET, LIMIT] }
