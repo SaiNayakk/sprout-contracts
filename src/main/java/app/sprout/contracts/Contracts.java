@@ -36,6 +36,15 @@ public final class Contracts {
     /** OpenAPI spec for the Sprout Stock Exchange's member API, the simulated exchange. */
     public static final String EXCHANGE_V1 = "sprout/contracts/openapi/exchange-v1.yaml";
 
+    /** OpenAPI spec for the Sprout Depository, the simulated securities depository. */
+    public static final String DEPOSITORY_V1 = "sprout/contracts/openapi/depository-v1.yaml";
+
+    /** OpenAPI spec for the Sprout Clearing Corporation, the simulated clearing corporation. */
+    public static final String CLEARING_V1 = "sprout/contracts/openapi/clearing-v1.yaml";
+
+    /** OpenAPI spec for Sprout's settlement back office (internal, and the clearing corporation's callback). */
+    public static final String SETTLEMENT_V1 = "sprout/contracts/openapi/settlement-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

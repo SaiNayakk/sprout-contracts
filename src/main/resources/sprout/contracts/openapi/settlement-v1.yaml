@@ -1,0 +1,102 @@
+openapi: 3.0.3
+info:
+  title: Sprout Settlement API (internal)
+  version: 1.0.0
+  description: |
+    Sprout's settlement back office. Internal only; the gateway never routes here.
+
+    It is told by the clearing corporation what each trade date comes to (`OBLIGATION`) and when it
+    has settled (`SETTLED`), and for each one:
+
+    1. **checks it against Sprout's own books** (the order service's summary of the day): the money,
+       and every client's shares bought and sold. Anything that doesn't match stops the settlement as a
+       **break**, with nothing paid, for a person to look at;
+    2. charges any client who didn't deliver shares they sold for the close-out;
+    3. **moves the money** through Sprout Bank: pays the clearing corporation, or sees its payment
+       arrive, and books the same movement in the ledger (so the ledger's `sprout:bank` always equals
+       Sprout's account at the bank);
+    4. once settled, tells the order service, which makes clients' sale proceeds cash and their bought
+       shares delivered.
+
+    Every step is repeatable and resumed after any failure: payments carry the clearing corporation's
+    reference, ledger entries fixed idempotency keys.
+servers:
+  - url: http://localhost:8112
+    description: The settlement back office (services and operators)
+paths:
+  /internal/v1/clearing-events:
+    post:
+      operationId: receiveClearingEvent
+      summary: The clearing corporation's news about a settlement
+      description: |
+        A `ClearingEvent` (see the clearing corporation's API), signed: `X-Clearing-Signature:
+        sha256=<hex of HMAC(body)>`. Each event is applied at most once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '204': { description: 'Received (or received before).' }
+        '401':
+          description: 'Missing or wrong signature (`INVALID_SIGNATURE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/settlements:
+    get:
+      operationId: listSettlements
+      summary: Settlements, newest trade date first (operators; at most 50)
+      security: [{ serviceKey: [] }]
+      responses:
+        '200':
+          description: Settlements and where each has got to.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settlements]
+                properties:
+                  settlements: { type: array, items: { $ref: '#/components/schemas/Settlement' } }
+        '401':
+          description: 'Missing or wrong key (`UNAUTHENTICATED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    serviceKey: { type: apiKey, in: header, name: X-Service-Key }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    Settlement:
+      type: object
+      required: [id, tradeDate, status, fundsDirection, fundsAmount, createdAt, updatedAt]
+      properties:
+        id: { type: string, description: 'The clearing corporation''s settlement id.' }
+        tradeDate: { type: string, format: date }
+        status:
+          type: string
+          enum: [RECEIVED, CHECKED, FUNDS_SETTLED, COMPLETED, BREAK]
+          description: 'RECEIVED: the obligation is in. CHECKED: it matches Sprout''s books. FUNDS_SETTLED: money moved and booked. COMPLETED: clients settled. BREAK: it didn''t match; stopped.'
+        fundsDirection: { type: string, enum: [PAY, RECEIVE, NONE] }
+        fundsAmount: { $ref: '#/components/schemas/Amount' }
+        payable: { $ref: '#/components/schemas/Amount' }
+        receivable: { $ref: '#/components/schemas/Amount' }
+        breakReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, INVALID_SIGNATURE, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }

@@ -1,0 +1,238 @@
+openapi: 3.0.3
+info:
+  title: Sprout Depository API (simulated depository)
+  version: 1.0.0
+  description: |
+    **The Sprout Depository is not part of Sprout.** It simulates a securities depository (like NSDL or
+    CDSL): it holds every investor's shares electronically, in demat accounts, and moves them only on a
+    valid instruction. No real securities exist here.
+
+    Two kinds of caller:
+
+    - **Depository participants** (brokers acting for their clients; Sprout is one), authenticated with
+      `X-Participant-Key`: open a demat account for a client and read it (holdings and movements).
+    - **The clearing corporation**, authenticated with `X-Clearing-Key`: settles trades by moving
+      shares between clients' accounts and its own settlement account. A pay-in takes a seller's shares
+      into the settlement account (the client's standing instruction lets the clearing corporation do
+      this on settlement day); a pay-out delivers a buyer's shares from it.
+
+    **Demat accounts** have a 16-digit id: the participant's 8-digit DP id, then the client's 8-digit
+    number. A participant opens one account per client reference; opening it again returns it.
+
+    **Instructions are idempotent and all-or-nothing.** Each transfer carries an `instructionId`.
+    Repeating it returns the original (`200`); a different transfer under the same id is refused
+    (`409`). A client's holding can never go below zero: a pay-in for more than they hold is refused
+    whole (`422 INSUFFICIENT_SECURITIES`) and nothing moves. The settlement account stands for the rest
+    of the market, so it may go below zero.
+servers:
+  - url: http://localhost:8111
+    description: The depository (participants and the clearing corporation)
+paths:
+  /participant/v1/accounts:
+    post:
+      operationId: openDematAccount
+      summary: Open a demat account for a client (or get the one already open)
+      security: [{ participantKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientRef, holderName]
+              properties:
+                clientRef: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$', description: 'The participant''s id for its client.' }
+                holderName: { type: string, minLength: 2, maxLength: 100 }
+      responses:
+        '201':
+          description: Opened.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DematAccount' }
+        '200':
+          description: This client already has one; here it is.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DematAccount' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /participant/v1/accounts/{boId}:
+    get:
+      operationId: getDematAccount
+      summary: One of my clients' demat accounts
+      security: [{ participantKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/BoId' }]
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DematAccount' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /participant/v1/accounts/{boId}/holdings:
+    get:
+      operationId: getHoldings
+      summary: What a client's demat account holds
+      security: [{ participantKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/BoId' }]
+      responses:
+        '200':
+          description: Holdings above zero, by symbol.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [boId, holdings]
+                properties:
+                  boId: { type: string }
+                  holdings: { type: array, items: { $ref: '#/components/schemas/Holding' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /participant/v1/accounts/{boId}/transactions:
+    get:
+      operationId: getDematTransactions
+      summary: A client's demat account movements, newest first (at most 100)
+      security: [{ participantKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/BoId' }]
+      responses:
+        '200':
+          description: The movements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transactions]
+                properties:
+                  transactions: { type: array, items: { $ref: '#/components/schemas/Movement' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /clearing/v1/transfers:
+    post:
+      operationId: transfer
+      summary: Settle shares (the clearing corporation only)
+      security: [{ clearingKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferRequest' }
+      responses:
+        '201':
+          description: Done.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '200':
+          description: Done before under this instructionId.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'A different transfer already has this instructionId (`INSTRUCTION_CONFLICT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'The client doesn''t hold that many (`INSUFFICIENT_SECURITIES`); nothing moved.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: listTransfers
+      summary: The transfers for one settlement (the clearing corporation only)
+      security: [{ clearingKey: [] }]
+      parameters:
+        - { name: settlementRef, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The transfers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transfers]
+                properties:
+                  transfers: { type: array, items: { $ref: '#/components/schemas/Transfer' } }
+        '401': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    participantKey: { type: apiKey, in: header, name: X-Participant-Key }
+    clearingKey: { type: apiKey, in: header, name: X-Clearing-Key }
+  parameters:
+    BoId:
+      name: boId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9]{16}$' }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `NOT_FOUND` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    DematAccount:
+      type: object
+      required: [boId, clientRef, holderName, openedAt]
+      properties:
+        boId: { type: string, pattern: '^[0-9]{16}$', example: '1208160000000042' }
+        clientRef: { type: string }
+        holderName: { type: string }
+        openedAt: { type: string, format: date-time }
+    Holding:
+      type: object
+      required: [symbol, quantity]
+      properties:
+        symbol: { type: string }
+        quantity: { type: integer }
+    Movement:
+      type: object
+      required: [symbol, quantity, balanceAfter, kind, instructionId, at]
+      properties:
+        symbol: { type: string }
+        quantity: { type: integer, description: 'Positive in, negative out.' }
+        balanceAfter: { type: integer }
+        kind: { type: string, enum: [PAY_IN, PAY_OUT] }
+        instructionId: { type: string }
+        settlementRef: { type: string }
+        at: { type: string, format: date-time }
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      required: [instructionId, kind, boId, symbol, quantity, settlementRef]
+      properties:
+        instructionId: { type: string, minLength: 1, maxLength: 120 }
+        kind: { type: string, enum: [PAY_IN, PAY_OUT], description: 'PAY_IN: the client''s shares into settlement. PAY_OUT: from settlement to the client.' }
+        boId: { type: string, pattern: '^[0-9]{16}$' }
+        symbol: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        settlementRef: { type: string, minLength: 1, maxLength: 120 }
+    Transfer:
+      type: object
+      required: [instructionId, kind, boId, symbol, quantity, settlementRef, executedAt]
+      properties:
+        instructionId: { type: string }
+        kind: { type: string, enum: [PAY_IN, PAY_OUT] }
+        boId: { type: string }
+        symbol: { type: string }
+        quantity: { type: integer }
+        settlementRef: { type: string }
+        executedAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, INSTRUCTION_CONFLICT, INSUFFICIENT_SECURITIES, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
