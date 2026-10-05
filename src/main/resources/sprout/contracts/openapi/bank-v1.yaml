@@ -11,9 +11,11 @@ info:
     - **Customers** (through the gateway under `/api/bank`, signed in with their Sprout login; a real
       bank would have its own): open an account with a starting balance of ₹1,00,000, set a UPI PIN,
       see and approve or decline payment requests with that PIN, and see their transactions.
-    - **Partners** (Sprout's services, `/partner/...`), authenticated with the header
-      `X-Partner-Key`: check a UPI address exists, ask a customer for money (a collect request), and
-      pay money out.
+    - **Partners** (businesses with an account here: Sprout, and the clearing corporation; `/partner/...`),
+      authenticated with the header `X-Partner-Key`: check a UPI address exists, ask a customer for
+      money (a collect request), pay money to anyone with an account here (customers or other
+      partners), and read their own statement, filtered by the reference a payment carried, to match
+      money that arrived to what they were expecting.
 
     **UPI PIN.** 4 or 6 digits, not all the same and not a simple sequence; stored hashed. Three wrong
     PINs lock approvals for 15 minutes.
@@ -215,7 +217,7 @@ paths:
   /partner/v1/payouts:
     post:
       operationId: payOut
-      summary: Pay money to a customer
+      summary: Pay money to a customer or another business
       security: [{ partnerKey: [] }]
       requestBody:
         required: true
@@ -243,6 +245,24 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /partner/v1/transactions:
+    get:
+      operationId: getPartnerStatement
+      summary: My own account's movements, newest first (at most 100)
+      security: [{ partnerKey: [] }]
+      parameters:
+        - { name: reference, in: query, required: false, schema: { type: string }, description: 'Only movements that carried this reference.' }
+      responses:
+        '200':
+          description: The movements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transactions]
+                properties:
+                  transactions: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+        '401': { $ref: '#/components/responses/Problem' }
   /partner/v1/payouts/{reference}:
     get:
       operationId: getPayout
@@ -319,6 +339,7 @@ components:
         direction: { type: string, enum: [IN, OUT] }
         description: { type: string }
         counterparty: { type: string }
+        reference: { type: string, description: 'What the payer said it was for (a payout''s reference).' }
         balanceAfter: { $ref: '#/components/schemas/Amount' }
         at: { type: string, format: date-time }
     BankEvent:

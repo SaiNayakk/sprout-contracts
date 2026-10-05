@@ -90,6 +90,10 @@ components:
         panMasked: { type: string, example: 'XXXXX1234K' }
         bankVpa: { type: string }
         status: { type: string, enum: [ACTIVE] }
+        dematAccount:
+          type: string
+          pattern: '^[0-9]{16}$'
+          description: 'The 16-digit demat account at the Sprout Depository where the customer''s shares are held, opened with the account (Sprout is the depository participant) and registered with the clearing corporation.'
         openedAt: { type: string, format: date-time }
     Problem:
       type: object

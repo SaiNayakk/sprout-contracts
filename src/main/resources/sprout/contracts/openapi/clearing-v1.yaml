@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: Sprout Clearing Corporation API (simulated clearing corporation)
+  version: 1.0.0
+  description: |
+    **The Sprout Clearing Corporation is not part of Sprout.** It simulates a clearing corporation (like
+    NSE Clearing): it stands between every buyer and seller on the exchange and settles their trades on
+    the next trading day (T+1). Members (brokers; Sprout is one) authenticate with `X-Member-Key`.
+
+    **How a trading day settles.** Once the next session has begun, the clearing corporation reads
+    every trade of the day from the exchange and nets them:
+
+    - **securities, per client and share**: what each client bought less what they sold;
+    - **funds, per member**: the value of everything its clients sold, less everything they bought.
+
+    Then, in order, each step repeatable and resumed after any failure:
+
+    1. **Securities pay-in.** Each net seller's shares move from their demat account into settlement
+       (members' clients give a standing instruction for this). A client who doesn't hold what they
+       sold is **short**: the shortfall is closed out in cash, at 20% above the price they sold at,
+       charged to the member.
+    2. **Obligation.** The member is told what it owes or is owed (`OBLIGATION`), with every line.
+    3. **Funds pay-in.** A member that owes pays from its bank account to the clearing corporation's,
+       with the obligation's `payReference`; the clearing corporation sees it in its bank statement.
+    4. **Funds pay-out.** A member that is owed is paid, with the same reference.
+    5. **Securities pay-out.** Each net buyer's shares are delivered to their demat account, and the
+       member is told the settlement is done (`SETTLED`).
+
+    **Clients** must be registered by their member, with their demat account, before they trade
+    (`PUT /member/v1/clients/{clientCode}`): the client code is the one the member puts on its orders.
+
+    **Callbacks** (`ClearingEvent`) are signed with HMAC-SHA256 of the body
+    (`X-Clearing-Signature: sha256=<hex>`) and delivered until acknowledged; apply each `eventId` once.
+
+    Amounts are rupee strings; quantities are shares.
+servers:
+  - url: http://localhost:8110
+    description: The clearing corporation (members)
+paths:
+  /member/v1/clients/{clientCode}:
+    parameters:
+      - { name: clientCode, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$' } }
+    put:
+      operationId: registerClient
+      summary: Register a client and their demat account
+      security: [{ memberKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [boId]
+              properties:
+                boId: { type: string, pattern: '^[0-9]{16}$' }
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '200':
+          description: Already registered with this demat account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'Already registered with a different demat account (`CLIENT_CONFLICT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getClient
+      summary: A registered client
+      security: [{ memberKey: [] }]
+      responses:
+        '200':
+          description: The client.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /member/v1/settlements:
+    get:
+      operationId: listSettlements
+      summary: My settlements, newest trade date first (at most 50)
+      security: [{ memberKey: [] }]
+      responses:
+        '200':
+          description: Settlements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settlements]
+                properties:
+                  settlements: { type: array, items: { $ref: '#/components/schemas/Settlement' } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /member/v1/settlements/{id}:
+    get:
+      operationId: getSettlement
+      summary: One of my settlements, with every line
+      security: [{ memberKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The settlement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settlement' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    memberKey: { type: apiKey, in: header, name: X-Member-Key }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `NOT_FOUND` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+    Client:
+      type: object
+      required: [clientCode, boId, registeredAt]
+      properties:
+        clientCode: { type: string }
+        boId: { type: string }
+        registeredAt: { type: string, format: date-time }
+    Line:
+      description: One client's net position in one share for the trade date.
+      type: object
+      required: [clientCode, symbol, bought, sold, net, status]
+      properties:
+        clientCode: { type: string }
+        symbol: { type: string }
+        bought: { type: integer, description: 'Shares bought that day.' }
+        sold: { type: integer, description: 'Shares sold that day.' }
+        net: { type: integer, description: 'bought - sold: positive is delivered to the client, negative is taken from them.' }
+        boughtValue: { $ref: '#/components/schemas/Amount' }
+        soldValue: { $ref: '#/components/schemas/Amount' }
+        status: { type: string, enum: [PENDING, PAID_IN, SHORT, DELIVERED, NOTHING_TO_MOVE] }
+        shortQuantity: { type: integer }
+        closeOutValue: { $ref: '#/components/schemas/Amount' }
+    Settlement:
+      type: object
+      required: [id, member, tradeDate, status, fundsDirection, fundsAmount, payReference, lines, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        member: { type: string }
+        tradeDate: { type: string, format: date }
+        status: { type: string, enum: [COMPUTED, SECURITIES_IN, AWAITING_FUNDS, FUNDS_IN, FUNDS_OUT, SETTLED] }
+        fundsDirection: { type: string, enum: [PAY, RECEIVE, NONE], description: 'PAY: the member pays the clearing corporation.' }
+        fundsAmount: { $ref: '#/components/schemas/Amount' }
+        boughtValue: { $ref: '#/components/schemas/Amount' }
+        soldValue: { $ref: '#/components/schemas/Amount' }
+        closeOutValue: { $ref: '#/components/schemas/Amount' }
+        payTo: { type: string, description: 'The UPI address to pay, when the member pays.' }
+        payReference: { type: string, description: 'The reference the funds must carry, either way.' }
+        lines: { type: array, items: { $ref: '#/components/schemas/Line' } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ClearingEvent:
+      description: Sent to the member's callback, signed.
+      type: object
+      required: [eventId, type, settlement, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        type: { type: string, enum: [OBLIGATION, SETTLED] }
+        settlement: { $ref: '#/components/schemas/Settlement' }
+        occurredAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, CLIENT_CONFLICT, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }

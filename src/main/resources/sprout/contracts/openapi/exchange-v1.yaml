@@ -24,6 +24,11 @@ info:
     **Prices** are rupee strings. A limit price must be a multiple of the instrument's tick size and
     within the day's price band: 20% either side of the previous close.
 
+    **Clients.** An order should carry the member's `clientCode` for the customer it is for (a unique
+    client code, as real exchanges require), so the clearing corporation can settle shares to that
+    customer's demat account. An order without one is the member's own (proprietary) trade, recorded
+    with the client code `PRO`.
+
     **Idempotent.** The member's `clientOrderId` names the order. Sending the same order again
     returns it (`200`); a different order under the same id is refused (`409`).
 
@@ -31,6 +36,9 @@ info:
     the body: header `X-Exchange-Signature: sha256=<hex>`. Each event is delivered until the member
     answers 2xx, so it can arrive more than once; members apply each `eventId` once. Members can
     also ask for an order's state at any time.
+
+    **The trade tape.** The clearing corporation reads each session's trades
+    (`/clearing/v1/trades`, with `X-Clearing-Key`) to work out what every member and client owes.
 servers:
   - url: http://localhost:8108
     description: The exchange (members only)
@@ -68,6 +76,27 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /clearing/v1/trades:
+    get:
+      operationId: listTrades
+      summary: A session's trades, in execution order (the clearing corporation only)
+      security: [{ clearingKey: [] }]
+      parameters:
+        - { name: sessionDate, in: query, required: true, schema: { type: string, format: date } }
+        - { name: after, in: query, required: false, schema: { type: string, format: uuid }, description: 'The last tradeId of the previous page.' }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        '200':
+          description: A page of trades; fewer than `limit` means the end.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trades]
+                properties:
+                  trades: { type: array, items: { $ref: '#/components/schemas/Trade' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
   /member/v1/orders/{clientOrderId}:
     parameters:
       - { name: clientOrderId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 64 } }
@@ -101,6 +130,7 @@ paths:
 components:
   securitySchemes:
     memberKey: { type: apiKey, in: header, name: X-Member-Key }
+    clearingKey: { type: apiKey, in: header, name: X-Clearing-Key }
   responses:
     Problem:
       description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE` (no prices yet).'
@@ -123,6 +153,7 @@ components:
       required: [clientOrderId, symbol, side, type, quantity]
       properties:
         clientOrderId: { type: string, minLength: 1, maxLength: 64 }
+        clientCode: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$', description: 'The member''s code for the customer this order is for; without it, PRO (the member''s own trade).' }
         symbol: { type: string, example: HARBOR }
         side: { type: string, enum: [BUY, SELL] }
         type: { type: string, enum: [MARKET, LIMIT] }
@@ -131,10 +162,11 @@ components:
         protectionPrice: { $ref: '#/components/schemas/Price' }
     Order:
       type: object
-      required: [exchangeOrderId, clientOrderId, symbol, side, type, quantity, status, filledQuantity, sessionDate, createdAt, updatedAt]
+      required: [exchangeOrderId, clientOrderId, clientCode, symbol, side, type, quantity, status, filledQuantity, sessionDate, createdAt, updatedAt]
       properties:
         exchangeOrderId: { type: string, format: uuid }
         clientOrderId: { type: string }
+        clientCode: { type: string }
         symbol: { type: string }
         side: { type: string, enum: [BUY, SELL] }
         type: { type: string, enum: [MARKET, LIMIT] }
@@ -152,7 +184,7 @@ components:
     ExecutionEvent:
       description: What the exchange sends to the member's callback URL.
       type: object
-      required: [eventId, type, clientOrderId, exchangeOrderId, symbol, side, quantity, occurredAt]
+      required: [eventId, type, clientOrderId, exchangeOrderId, symbol, side, quantity, sessionDate, occurredAt]
       properties:
         eventId: { type: string, format: uuid }
         type: { type: string, enum: [ORDER_FILLED, ORDER_CANCELLED, ORDER_EXPIRED] }
@@ -161,10 +193,24 @@ components:
         symbol: { type: string }
         side: { type: string, enum: [BUY, SELL] }
         quantity: { type: integer }
+        sessionDate: { type: string, format: date, description: 'The trading session (trade date) it happened in.' }
         price: { $ref: '#/components/schemas/Price' }
         tradeId: { type: string, format: uuid }
         reason: { type: string }
         occurredAt: { type: string, format: date-time }
+    Trade:
+      type: object
+      required: [tradeId, member, clientCode, symbol, side, quantity, price, sessionDate, executedAt]
+      properties:
+        tradeId: { type: string, format: uuid }
+        member: { type: string }
+        clientCode: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        quantity: { type: integer }
+        price: { $ref: '#/components/schemas/Price' }
+        sessionDate: { type: string, format: date }
+        executedAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code]

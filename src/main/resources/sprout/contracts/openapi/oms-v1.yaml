@@ -183,10 +183,91 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /internal/v1/settlements/{tradeDate}/summary:
+    get:
+      operationId: getSettlementSummary
+      summary: A trade date by Sprout's books (the settlement back office only)
+      description: |
+        What Sprout owes the clearing corporation for the day (purchases, intraday losses, close-outs)
+        and is owed (sales, intraday profits), and each client's lines, to check the clearing
+        corporation's obligation against. Not ready to check while `unpostedLedgerEntries` is above zero.
+      security: [{ serviceKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/TradeDate' }]
+      responses:
+        '200':
+          description: The day.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementSummary' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /internal/v1/settlements/{tradeDate}/shortages:
+    post:
+      operationId: bookShortages
+      summary: Charge clients for shares they sold but didn't deliver (the settlement back office only)
+      security: [{ serviceKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/TradeDate' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settlementId, shortages]
+              properties:
+                settlementId: { type: string }
+                shortages:
+                  type: array
+                  items:
+                    type: object
+                    required: [clientCode, symbol, quantity, closeOutValue]
+                    properties:
+                      clientCode: { type: string }
+                      symbol: { type: string }
+                      quantity: { type: integer }
+                      closeOutValue: { $ref: '#/components/schemas/Amount' }
+      responses:
+        '204': { description: 'Booked (or booked before).' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /internal/v1/settlements/{tradeDate}/complete:
+    post:
+      operationId: completeSettlement
+      summary: The day has settled (the settlement back office only)
+      description: Each client's sale proceeds of the day become cash; shares delivered to their demat account stop being T1. Done once per trade date.
+      security: [{ serviceKey: [] }]
+      parameters: [{ $ref: '#/components/parameters/TradeDate' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settlementId, deliveries]
+              properties:
+                settlementId: { type: string }
+                deliveries:
+                  type: array
+                  items:
+                    type: object
+                    required: [clientCode, symbol, quantity]
+                    properties:
+                      clientCode: { type: string }
+                      symbol: { type: string }
+                      quantity: { type: integer, description: 'Shares delivered to the client''s demat account.' }
+      responses:
+        '204': { description: 'Done (or done before).' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+    serviceKey: { type: apiKey, in: header, name: X-Service-Key }
   parameters:
+    TradeDate:
+      name: tradeDate
+      in: path
+      required: true
+      schema: { type: string, format: date }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -306,6 +387,25 @@ components:
         blocked: { $ref: '#/components/schemas/Amount' }
         unsettled: { $ref: '#/components/schemas/Amount' }
         dues: { $ref: '#/components/schemas/Amount' }
+    SettlementSummary:
+      type: object
+      required: [tradeDate, payable, receivable, closeOuts, unpostedLedgerEntries, lines]
+      properties:
+        tradeDate: { type: string, format: date }
+        payable: { $ref: '#/components/schemas/Amount' }
+        receivable: { $ref: '#/components/schemas/Amount' }
+        closeOuts: { $ref: '#/components/schemas/Amount' }
+        unpostedLedgerEntries: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [clientCode, symbol, bought, sold]
+            properties:
+              clientCode: { type: string }
+              symbol: { type: string }
+              bought: { type: integer }
+              sold: { type: integer }
     Problem:
       type: object
       required: [type, title, status, code]
