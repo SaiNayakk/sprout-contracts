@@ -20,6 +20,17 @@ info:
     **UPI PIN.** 4 or 6 digits, not all the same and not a simple sequence; stored hashed. Three wrong
     PINs lock approvals for 15 minutes.
 
+    **Paying.** Customers pay anyone with an account here by UPI address and PIN, such as the demo
+    merchants listed at `/v1/merchants` (fictional shops: a chai stall, a metro card, a grocer).
+
+    **AutoPay mandates** (like UPI AutoPay): a partner asks a customer for standing permission to debit
+    up to a fixed amount each time, for a stated purpose. The customer approves once, with their UPI
+    PIN; the partner can then debit within that limit without asking again, until the customer revokes
+    it. A mandate may also ask to be told about the customer's UPI spends (`shareSpends`), as round-up
+    apps do; the customer sees that before approving. Unanswered mandate requests expire after 15
+    minutes. Mandate outcomes and shared spends are sent to the mandate's callback as `MandateEvent`s,
+    signed and retried like `BankEvent`s.
+
     **Collect requests** wait for the customer for 5 minutes, then expire. Every outcome (approved,
     declined, expired) is sent to the partner's callback as a `BankEvent`, signed with HMAC-SHA256
     (`X-Bank-Signature: sha256=<hex>`), and retried until it is acknowledged.
@@ -125,6 +136,134 @@ paths:
               schema: { $ref: '#/components/schemas/CollectRequest' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+  /v1/merchants:
+    get:
+      operationId: listMerchants
+      summary: Demo merchants a customer can pay (fictional shops)
+      responses:
+        '200':
+          description: Merchants.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [merchants]
+                properties:
+                  merchants: { type: array, items: { $ref: '#/components/schemas/Merchant' } }
+  /v1/payments:
+    post:
+      operationId: payByUpi
+      summary: Pay someone by UPI address, with my UPI PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [payeeVpa, amount, upiPin]
+              properties:
+                payeeVpa: { type: string }
+                amount: { $ref: '#/components/schemas/Amount' }
+                upiPin: { type: string }
+                note: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: Paid. The debit from my account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: 'Wrong PIN (`INVALID_PIN`, with attempts left) or not enough money (`INSUFFICIENT_BALANCE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: 'Too many wrong PINs; locked for a while (`PIN_LOCKED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/mandates:
+    get:
+      operationId: listMandates
+      summary: AutoPay mandates asked of me, newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, ACTIVE, DECLINED, EXPIRED, REVOKED] } }
+      responses:
+        '200':
+          description: Mandates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mandates]
+                properties:
+                  mandates: { type: array, items: { $ref: '#/components/schemas/Mandate' } }
+  /v1/mandates/{id}/approve:
+    post:
+      operationId: approveMandate
+      summary: Grant a mandate, with my UPI PIN
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [upiPin]
+              properties:
+                upiPin: { type: string }
+      responses:
+        '200':
+          description: Active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'No longer pending (`REQUEST_NOT_PENDING`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Wrong PIN (`INVALID_PIN`, with attempts left).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '423':
+          description: 'Too many wrong PINs; locked for a while (`PIN_LOCKED`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/mandates/{id}/decline:
+    post:
+      operationId: declineMandate
+      summary: Refuse a mandate
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Declined.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/mandates/{id}/revoke:
+    post:
+      operationId: revokeMandate
+      summary: Withdraw a mandate I granted; no further debits
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /v1/transactions:
     get:
       operationId: listTransactions
@@ -214,6 +353,92 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CollectRequest' }
         '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/mandates:
+    post:
+      operationId: requestMandate
+      summary: Ask a customer for an AutoPay mandate
+      security: [{ partnerKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [payerVpa, maxAmount, purpose, reference, callbackUrl]
+              properties:
+                payerVpa: { type: string }
+                maxAmount: { $ref: '#/components/schemas/Amount' }
+                purpose: { type: string, maxLength: 100, description: 'Shown to the customer, e.g. "Round-ups into your Sprout goals".' }
+                reference: { type: string, maxLength: 120, description: 'Unique per partner: asking again returns the same mandate.' }
+                shareSpends: { type: boolean, default: false, description: 'Also tell the partner about the customer''s UPI spends while active.' }
+                callbackUrl: { type: string, description: 'Where MandateEvents are sent.' }
+      responses:
+        '201':
+          description: Waiting for the customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '200':
+          description: Already requested with this reference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/mandates/{id}:
+    get:
+      operationId: getMandate
+      summary: A mandate's status (for reconciliation)
+      security: [{ partnerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The mandate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mandate' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /partner/v1/mandates/{id}/debits:
+    post:
+      operationId: debitMandate
+      summary: Take money under an active mandate, within its limit
+      security: [{ partnerKey: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [amount, reference]
+              properties:
+                amount: { $ref: '#/components/schemas/Amount' }
+                reference: { type: string, maxLength: 120, description: 'Unique per partner: debiting again with it returns the original debit.' }
+      responses:
+        '201':
+          description: Debited.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MandateDebit' }
+        '200':
+          description: Already debited with this reference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MandateDebit' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'The mandate isn''t active (`REQUEST_NOT_PENDING`, with its status).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Above the mandate''s limit (`VALIDATION_FAILED`) or not enough money (`INSUFFICIENT_BALANCE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
   /partner/v1/payouts:
     post:
       operationId: payOut
@@ -354,6 +579,56 @@ components:
         reference: { type: string, description: 'What the payer said it was for (a payout''s reference).' }
         balanceAfter: { $ref: '#/components/schemas/Amount' }
         at: { type: string, format: date-time }
+    Merchant:
+      type: object
+      required: [vpa, name, category]
+      properties:
+        vpa: { type: string, example: monsoonchai@sproutbank }
+        name: { type: string, example: Monsoon Chai }
+        category: { type: string, example: Food and drink }
+    Mandate:
+      type: object
+      required: [id, payerVpa, payeeVpa, payeeName, maxAmount, purpose, shareSpends, status, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        payerVpa: { type: string }
+        payeeVpa: { type: string }
+        payeeName: { type: string, example: Sprout Investments }
+        maxAmount: { $ref: '#/components/schemas/Amount' }
+        purpose: { type: string }
+        reference: { type: string }
+        shareSpends: { type: boolean }
+        status: { type: string, enum: [PENDING, ACTIVE, DECLINED, EXPIRED, REVOKED] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, description: 'When an unanswered request lapses.' }
+        decidedAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+    MandateDebit:
+      type: object
+      required: [id, mandateId, amount, reference, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mandateId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        reference: { type: string }
+        status: { type: string, enum: [COMPLETED] }
+        createdAt: { type: string, format: date-time }
+    MandateEvent:
+      type: object
+      description: |
+        Sent to a mandate's callbackUrl, signed like a BankEvent. At least once; apply each eventId once.
+        `SPEND` (only for mandates with shareSpends, while active) reports one UPI payment the customer
+        made: its id, amount and payee.
+      required: [eventId, type, mandateId, reference, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        type: { type: string, enum: [MANDATE_ACTIVE, MANDATE_DECLINED, MANDATE_EXPIRED, MANDATE_REVOKED, SPEND] }
+        mandateId: { type: string, format: uuid }
+        reference: { type: string, description: 'The mandate''s reference.' }
+        spendId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        payeeName: { type: string }
+        occurredAt: { type: string, format: date-time }
     BankEvent:
       type: object
       description: Sent to a collect request's callbackUrl, signed. At least once; apply each eventId once.

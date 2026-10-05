@@ -57,6 +57,9 @@ public final class Contracts {
     /** OpenAPI spec for habits: streaks, levels, badges, points, squads, readiness, Future You. */
     public static final String HABITS_V1 = "sprout/contracts/openapi/habits-v1.yaml";
 
+    /** OpenAPI spec for goals: pots invested in a share, and round-ups. */
+    public static final String GOALS_V1 = "sprout/contracts/openapi/goals-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

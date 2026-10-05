@@ -1,0 +1,309 @@
+openapi: 3.0.3
+info:
+  title: Sprout Goals API (pots and round-ups)
+  version: 1.0.0
+  description: |
+    Goals: pots of invested money, each saving towards something (a trip, a laptop, a deposit on a
+    home) with a target amount and, if the customer likes, a date. And round-ups: the spare change from
+    everyday UPI spends, swept into a pot and invested.
+
+    Clients reach these endpoints through the gateway under `/api/goals`. Every endpoint needs a
+    signed-in user with an open Sprout account.
+
+    **A pot invests in one share.** Money put into a pot (a contribution from the Sprout balance, or a
+    round-up sweep) buys as many whole shares of the pot's share as it covers, at the market, through
+    the order service like any other order (same checks, same charges), tagged with the pot. What
+    doesn't make a whole share stays in the pot, uninvested, for the next buy. Buys happen while the
+    market is open; money put in while it is closed waits for the next session.
+
+    **Round-ups.** With round-ups on, each UPI spend the customer makes is rounded up to the next ₹10,
+    ₹50 or ₹100, times a multiplier (1x to 3x): a ₹46 chai with ₹10 round-ups saves ₹4 (₹12 at 3x).
+    Round-ups add up until there is at least ₹100, then are swept in one debit under the customer's
+    AutoPay mandate (set up in payments and approved in their bank) into the chosen pot. Without an
+    active mandate nothing is taken; round-ups wait.
+
+    **Reaching a goal.** A pot is `REACHED` when what it holds (its shares at the last price, plus
+    anything uninvested) is at least its target. It keeps its shares; closing a pot stops new money
+    going in and leaves its shares in the customer's holdings.
+
+    At most 5 open pots; targets from ₹500 to ₹1,00,00,000; contributions ₹100 to ₹1,00,000.
+servers:
+  - url: http://localhost:8100/api/goals
+    description: Through the gateway
+paths:
+  /v1/pots:
+    get:
+      operationId: listPots
+      summary: My pots, newest first
+      responses:
+        '200':
+          description: Pots.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pots]
+                properties:
+                  pots: { type: array, items: { $ref: '#/components/schemas/Pot' } }
+    post:
+      operationId: createPot
+      summary: Start a pot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, target, symbol]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 40, example: Goa trip }
+                target: { $ref: '#/components/schemas/Amount' }
+                targetDate: { type: string, format: date }
+                symbol: { type: string, example: SAPLING }
+      responses:
+        '201':
+          description: Started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pot' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '409':
+          description: 'Already 5 open pots (`TOO_MANY_POTS`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'No such share (`UNKNOWN_INSTRUMENT`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v1/pots/{id}:
+    get:
+      operationId: getPot
+      summary: A pot and everything that went into it
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: The pot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PotDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/pots/{id}/contributions:
+    post:
+      operationId: contribute
+      summary: Put money from my Sprout balance into a pot
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [amount]
+              properties:
+                amount: { $ref: '#/components/schemas/Amount' }
+      responses:
+        '201':
+          description: In the pot; its share is bought in the next open session if not now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movement' }
+        '200':
+          description: Already put in with this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movement' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 'The pot is closed (`POT_STATE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'More than the available Sprout balance (`INSUFFICIENT_FUNDS`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/pots/{id}/close:
+    post:
+      operationId: closePot
+      summary: Close a pot (its shares stay in my holdings)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pot' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/round-ups:
+    get:
+      operationId: getRoundUps
+      summary: My round-up settings, what is waiting to be swept, and recent round-ups
+      responses:
+        '200':
+          description: Round-ups.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoundUps' }
+    put:
+      operationId: setRoundUps
+      summary: Turn round-ups on or off, and choose how and where
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                roundTo: { type: integer, enum: [10, 50, 100], default: 10 }
+                multiplier: { type: integer, minimum: 1, maximum: 3, default: 1 }
+                potId: { type: string, format: uuid, description: 'Required to turn round-ups on: the open pot they go into.' }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoundUps' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/summary:
+    get:
+      operationId: goalsSummary
+      summary: What a customer has done with goals (Sprout services only, e.g. habits)
+      security: [{ serviceKey: [] }]
+      parameters:
+        - { name: userId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GoalsSummary' }
+        '401': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+    serviceKey: { type: apiKey, in: header, name: X-Service-Key }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NoAccount:
+      description: 'Open a Sprout account first (`NO_ACCOUNT`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 'No such pot of yours (`NOT_FOUND`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Amount:
+      type: string
+      pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
+      example: '500.00'
+    Pot:
+      type: object
+      required: [id, name, symbol, target, status, saved, invested, quantity, value, uninvested, progressPercent, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        symbol: { type: string }
+        target: { $ref: '#/components/schemas/Amount' }
+        targetDate: { type: string, format: date }
+        status: { type: string, enum: [OPEN, REACHED, CLOSED] }
+        saved: { $ref: '#/components/schemas/Amount', description: 'Everything put in: contributions and round-up sweeps.' }
+        invested: { $ref: '#/components/schemas/Amount', description: 'What its shares cost, with charges.' }
+        quantity: { type: integer, description: 'Shares bought for this pot.' }
+        value: { $ref: '#/components/schemas/Amount', description: 'Its shares at the last price.' }
+        uninvested: { $ref: '#/components/schemas/Amount', description: 'Put in but not yet a whole share.' }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        monthlyNeeded: { $ref: '#/components/schemas/Amount', description: 'With a target date: what to put in each month from now to reach it.' }
+        createdAt: { type: string, format: date-time }
+        reachedAt: { type: string, format: date-time }
+    PotDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Pot' }
+        - type: object
+          required: [movements]
+          properties:
+            movements: { type: array, items: { $ref: '#/components/schemas/Movement' } }
+    Movement:
+      type: object
+      description: 'Money into a pot (`CONTRIBUTION`, `ROUND_UPS`), or a buy of its share with it (`PURCHASE`).'
+      required: [id, kind, amount, status, at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [CONTRIBUTION, ROUND_UPS, PURCHASE] }
+        amount: { $ref: '#/components/schemas/Amount' }
+        quantity: { type: integer }
+        price: { $ref: '#/components/schemas/Amount' }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, DONE, FAILED] }
+        reason: { type: string }
+        at: { type: string, format: date-time }
+    RoundUp:
+      type: object
+      required: [spendId, spent, payeeName, amount, status, at]
+      properties:
+        spendId: { type: string, format: uuid }
+        spent: { $ref: '#/components/schemas/Amount' }
+        payeeName: { type: string }
+        amount: { $ref: '#/components/schemas/Amount', description: 'The round-up, with the multiplier.' }
+        status: { type: string, enum: [WAITING, SWEPT] }
+        at: { type: string, format: date-time }
+    RoundUps:
+      type: object
+      required: [enabled, roundTo, multiplier, autoPay, waiting, recent]
+      properties:
+        enabled: { type: boolean }
+        roundTo: { type: integer, enum: [10, 50, 100] }
+        multiplier: { type: integer, minimum: 1, maximum: 3 }
+        potId: { type: string, format: uuid }
+        autoPay: { type: string, enum: [NONE, AWAITING_APPROVAL, ACTIVE], description: 'The customer''s AutoPay mandate, which sweeps need.' }
+        waiting: { $ref: '#/components/schemas/Amount', description: 'Rounded up and not yet swept.' }
+        sweepAt: { $ref: '#/components/schemas/Amount', description: 'Swept once at least this much is waiting.' }
+        swept: { $ref: '#/components/schemas/Amount', description: 'Swept into pots so far, in all.' }
+        recent: { type: array, items: { $ref: '#/components/schemas/RoundUp' } }
+    GoalsSummary:
+      type: object
+      required: [userId, potsOpened, potsReached, roundUps, roundedUp, contributions]
+      properties:
+        userId: { type: string, format: uuid }
+        potsOpened: { type: integer }
+        potsReached: { type: integer }
+        roundUps: { type: integer, description: 'Spends rounded up, in all.' }
+        roundedUp: { $ref: '#/components/schemas/Amount' }
+        contributions: { type: integer }
+        firstRoundUpAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NO_ACCOUNT, NOT_FOUND, UNKNOWN_INSTRUMENT, TOO_MANY_POTS, POT_STATE,
+                 INSUFFICIENT_FUNDS, RATE_LIMITED, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - bearer: []

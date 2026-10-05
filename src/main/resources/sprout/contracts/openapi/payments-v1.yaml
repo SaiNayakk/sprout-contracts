@@ -16,6 +16,11 @@ info:
     **Withdrawing** takes the amount out of the available balance at once (held), asks the bank to pay
     it out, then settles; if the bank fails, the hold is released and the money is available again.
 
+    **AutoPay** (for round-ups): the customer asks Sprout to set up a UPI AutoPay mandate with their
+    bank, up to a limit per debit, and approves it once in the bank with their PIN. While it is active,
+    Sprout services may debit within the limit (each debit lands in the customer's Sprout balance like
+    a deposit) and hear about the customer's UPI spends, which is what round-ups are made from.
+
     **Retries are safe.** `POST` requests need an `Idempotency-Key` header (any unique string, e.g. a
     UUID); repeating a request with the same key returns the original result instead of moving money
     twice. Amounts are decimal strings in rupees; each payment is between ₹1 and ₹1,00,000.
@@ -145,12 +150,109 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Withdrawal' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/mandates:
+    post:
+      operationId: setUpAutoPay
+      summary: Ask my bank for an AutoPay mandate for round-ups
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [maxAmount]
+              properties:
+                maxAmount: { $ref: '#/components/schemas/Amount' }
+      responses:
+        '201':
+          description: Asked; approve it in Sprout Bank.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoPay' }
+        '200':
+          description: Already asked with this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoPay' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/mandates/me:
+    get:
+      operationId: getMyAutoPay
+      summary: My latest AutoPay mandate
+      responses:
+        '200':
+          description: The mandate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoPay' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/mandate-debits:
+    post:
+      operationId: debitAutoPay
+      summary: Take money from a customer's bank under their AutoPay (Sprout services only)
+      description: |
+        For Sprout services (header `X-Service-Key`). Debits the customer's bank under their active
+        mandate and credits their Sprout balance. Unique per `reference`: repeating it returns the first
+        result. A definite refusal (no active mandate, above its limit, not enough money in the bank)
+        is `FAILED` with the reason; an unknown outcome is a `503`, and repeating it is safe.
+      security: [{ serviceKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [userId, amount, reference, description]
+              properties:
+                userId: { type: string, format: uuid }
+                amount: { $ref: '#/components/schemas/Amount' }
+                reference: { type: string, maxLength: 120 }
+                description: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: Done or refused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoPayDebit' }
+        '200':
+          description: Done before with this reference.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoPayDebit' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /internal/v1/spends:
+    get:
+      operationId: listSpends
+      summary: Customers' UPI spends their AutoPay shares, oldest first (Sprout services only)
+      description: Read with the `next` of the previous page as `after`, to see each spend once.
+      security: [{ serviceKey: [] }]
+      parameters:
+        - { name: after, in: query, required: false, schema: { type: integer, format: int64, default: 0 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+      responses:
+        '200':
+          description: A page of spends.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [spends, next]
+                properties:
+                  spends: { type: array, items: { $ref: '#/components/schemas/Spend' } }
+                  next: { type: integer, format: int64, description: 'Pass as `after` for the next page.' }
+        '401': { $ref: '#/components/responses/Problem' }
   /internal/v1/bank-events:
     post:
       operationId: receiveBankEvent
-      summary: Sprout Bank tells Sprout what happened to a collect request
+      summary: Sprout Bank tells Sprout what happened to a collect request or mandate
       description: |
-        Called by the bank, not by clients. The body is a `BankEvent` (see the Sprout Bank API) signed
+        Called by the bank, not by clients. The body is a `BankEvent` or `MandateEvent` (see the Sprout Bank API) signed
         with HMAC-SHA256 under the key Sprout and the bank share: header
         `X-Bank-Signature: sha256=<hex of HMAC(body)>`. Unsigned or wrongly signed events are refused.
         Events can arrive more than once and out of order; each is applied at most once.
@@ -175,6 +277,7 @@ paths:
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+    serviceKey: { type: apiKey, in: header, name: X-Service-Key }
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -229,6 +332,38 @@ components:
         failureReason: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    AutoPay:
+      type: object
+      required: [id, maxAmount, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        maxAmount: { $ref: '#/components/schemas/Amount' }
+        status: { type: string, enum: [AWAITING_APPROVAL, ACTIVE, DECLINED, EXPIRED, REVOKED, FAILED] }
+        bankMandateId: { type: string, description: 'The mandate in Sprout Bank, to approve there.' }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AutoPayDebit:
+      type: object
+      required: [id, userId, amount, reference, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        reference: { type: string }
+        status: { type: string, enum: [COMPLETED, FAILED] }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+    Spend:
+      type: object
+      required: [seq, id, userId, amount, payeeName, at]
+      properties:
+        seq: { type: integer, format: int64 }
+        id: { type: string, format: uuid, description: 'The bank''s id for the spend.' }
+        userId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Amount' }
+        payeeName: { type: string }
+        at: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, code]
