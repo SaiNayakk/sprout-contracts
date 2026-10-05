@@ -63,6 +63,9 @@ public final class Contracts {
     /** OpenAPI spec for rewards: the vault and referrals. */
     public static final String REWARDS_V1 = "sprout/contracts/openapi/rewards-v1.yaml";
 
+    /** OpenAPI spec for the public sandbox: fictional customers to explore as. */
+    public static final String SANDBOX_V1 = "sprout/contracts/openapi/sandbox-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

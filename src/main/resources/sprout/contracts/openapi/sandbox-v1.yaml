@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: Sprout Sandbox API (the public demo)
+  version: 1.0.0
+  description: |
+    The public sandbox: anyone can explore Sprout as one of fifteen fictional customers with months of
+    real history, without signing up. Signing up for real works too.
+
+    Clients reach these endpoints through the gateway under `/api/sandbox`, without signing in.
+
+    **Who to explore as.** Visitors choose: a woman, a man, someone non-binary or of another gender, or
+    no preference. Five fictional people in each group, from across India, each with their own pronouns,
+    city, story and way of investing. A visitor is given whichever person in their group was explored
+    least recently, and gets an ordinary signed-in session as them.
+
+    **History is real.** The sandbox's market runs fast (about 30 trading days a day), and each fictional
+    person acts in their own way every trading session: plans buy monthly, UPI spends are rounded up and
+    swept, pots fill, the odd share is bought, money is added when cash runs low. Every one of those goes
+    through the same services, exchange and books as a real customer's, so their streaks, statements and
+    reconciliation are exactly as real as anyone's.
+
+    Several visitors can be the same person at once; what one does, the next sees.
+servers:
+  - url: http://localhost:8100/api/sandbox
+    description: Through the gateway
+paths:
+  /v1/personas:
+    get:
+      operationId: listPersonas
+      summary: The fictional people a visitor can explore as, by group
+      security: []
+      responses:
+        '200':
+          description: The groups and people.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Personas' }
+  /v1/demo-sessions:
+    post:
+      operationId: startDemo
+      summary: Explore Sprout as someone from the chosen group
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [group]
+              properties:
+                group: { type: string, enum: [WOMEN, MEN, NON_BINARY_AND_OTHER, ANY] }
+      responses:
+        '201':
+          description: Signed in as them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoSession' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '503':
+          description: 'The sandbox is still setting up, or nobody in the group can be signed in right now (`UPSTREAM_UNAVAILABLE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Persona:
+      type: object
+      required: [id, name, pronouns, group, city, story, style]
+      properties:
+        id: { type: string, example: meera }
+        name: { type: string, example: Meera Iyer }
+        pronouns: { type: string, example: she/her }
+        group: { type: string, enum: [WOMEN, MEN, NON_BINARY_AND_OTHER] }
+        city: { type: string, example: Chennai }
+        story: { type: string, description: 'Who they are and what they are saving for (fictional).' }
+        style: { type: string, enum: [STEADY_PLANS, ROUND_UPS, GOAL_SAVER, NEW_INVESTOR, EXPLORER], description: 'How they invest.' }
+    Personas:
+      type: object
+      required: [groups, personas]
+      properties:
+        groups:
+          type: array
+          items:
+            type: object
+            required: [code, label]
+            properties:
+              code: { type: string, enum: [WOMEN, MEN, NON_BINARY_AND_OTHER, ANY] }
+              label: { type: string, example: Non-binary or another gender }
+        personas: { type: array, items: { $ref: '#/components/schemas/Persona' } }
+    DemoSession:
+      type: object
+      required: [persona, accessToken, tokenType, expiresIn, refreshToken]
+      properties:
+        persona: { $ref: '#/components/schemas/Persona' }
+        accessToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer }
+        refreshToken: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE] }
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }

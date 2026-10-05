@@ -140,10 +140,22 @@ class ContractsTest {
     }
 
     @Test
+    void sandboxSpecsParseWithoutErrors() {
+        Object[][] specs = {
+                {Contracts.SANDBOX_V1, new String[] {"/v1/personas", "/v1/demo-sessions"}},
+                {Contracts.IDENTITY_V1, new String[] {"/internal/v1/demo-users"}}};
+        for (Object[] spec : specs) {
+            SwaggerParseResult result = new OpenAPIV3Parser().readContents(Contracts.read((String) spec[0]));
+            assertThat(result.getMessages()).as((String) spec[0]).isEmpty();
+            assertThat(result.getOpenAPI().getPaths()).as((String) spec[0]).containsKeys((String[]) spec[1]);
+        }
+    }
+
+    @Test
     void everyOperationHasAnId() {
         for (String spec : new String[] {Contracts.IDENTITY_V1, Contracts.MARKETDATA_V1, Contracts.ACCOUNTS_V1,
                 Contracts.LEDGER_V1, Contracts.PAYMENTS_V1, Contracts.BANK_V1, Contracts.GOALS_V1,
-                Contracts.REWARDS_V1, Contracts.HABITS_V1}) {
+                Contracts.REWARDS_V1, Contracts.HABITS_V1, Contracts.SANDBOX_V1}) {
             var openApi = new OpenAPIV3Parser().readContents(Contracts.read(spec)).getOpenAPI();
             openApi.getPaths().forEach((path, item) -> item.readOperations()
                     .forEach(op -> assertThat(op.getOperationId()).as(spec + " " + path).isNotBlank()));
