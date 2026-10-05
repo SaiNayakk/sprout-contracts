@@ -15,7 +15,14 @@ info:
     |---|---|---|
     | `customer:{userId}:cash` | liability (money Sprout owes the customer) | no |
     | `customer:{userId}:withdrawal-hold` | liability (being paid out) | no |
+    | `customer:{userId}:order-hold` | liability (blocked for open orders and intraday margin) | no |
+    | `customer:{userId}:unsettled` | liability (sale proceeds until settlement) | no |
+    | `customer:{userId}:dues` | asset (an intraday loss beyond the customer's money) | no |
     | `sprout:bank` | asset (client money held at Sprout Bank) | no |
+    | `sprout:clearing-receivable` | asset (owed to Sprout by the clearing corporation) | no |
+    | `sprout:clearing-payable` | liability (owed by Sprout to the clearing corporation) | no |
+    | `sprout:income:brokerage` | liability side (Sprout's own income) | no |
+    | `sprout:payable:{stt,stamp-duty,exchange-charges,sebi-fees,gst}` | liability (taxes and fees collected, to pay on) | no |
 
     **Amounts** are decimal strings in rupees with at most two decimals (`"1500.00"`), held internally
     in paise, so no floating point ever touches money.

@@ -14,6 +14,8 @@ Part of **Sprout**, a simulated end-to-end brokerage built to learn how institut
 | Ledger API v1 (internal) | `src/main/resources/sprout/contracts/openapi/ledger-v1.yaml` | sprout-ledger |
 | Payments API v1 | `src/main/resources/sprout/contracts/openapi/payments-v1.yaml` | sprout-payments |
 | Sprout Bank API v1 (simulated bank) | `src/main/resources/sprout/contracts/openapi/bank-v1.yaml` | sprout-bank |
+| Orders API v1 | `src/main/resources/sprout/contracts/openapi/oms-v1.yaml` | sprout-oms |
+| Sprout Stock Exchange member API v1 (simulated exchange) | `src/main/resources/sprout/contracts/openapi/exchange-v1.yaml` | sprout-exchange |
 | `marketdata.tick` v1 | `src/main/resources/sprout/contracts/events/marketdata/tick.v1.schema.json` | sprout-marketdata |
 | `identity.user.registered` v1 | `src/main/resources/sprout/contracts/events/identity/user-registered.v1.schema.json` | sprout-identity |
 
