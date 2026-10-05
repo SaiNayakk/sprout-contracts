@@ -20,6 +20,11 @@ info:
       held, a plan's instalment, and a purchase kept for a year.
     - **Points**: 100 for each month with a purchase, 50 more for each plan instalment. They **vest
       after 30 days** if the shares bought aren't sold in that time; sold sooner, they're forfeited.
+    - **Monthly challenges**: four each month, all about the habit (invest on two different days, the
+      plan buys, a pot grows, three different shares). Each completed earns 50 points, which vest when
+      the month ends.
+    - **Year Wrapped**: a look back at a year of investing: months invested, the longest streak, what
+      was bought most, plans and pots, badges and points, and a title for the year.
     - **A nudge, not a ban**: more than 20 intraday or sell trades in the last 5 sessions shows a
       cool-off nudge (`OVERTRADING`). Nothing is blocked.
 
@@ -72,6 +77,33 @@ paths:
                 properties:
                   showInvestedRange: { type: boolean }
         '401': { $ref: '#/components/responses/Problem' }
+  /v1/challenges:
+    get:
+      operationId: getChallenges
+      summary: This month's challenges and how far along I am
+      responses:
+        '200':
+          description: The month's challenges.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Challenges' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/wrapped:
+    get:
+      operationId: getWrapped
+      summary: My year of investing, wrapped
+      parameters:
+        - { name: year, in: query, required: false, schema: { type: integer, minimum: 2020, maximum: 2100 }, description: 'Defaults to this year.' }
+      responses:
+        '200':
+          description: The year.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Wrapped' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NoAccount' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/future:
     get:
       operationId: projectFuture
@@ -282,6 +314,48 @@ components:
           properties:
             code: { type: string, enum: [OVERTRADING] }
             message: { type: string }
+    Challenges:
+      type: object
+      required: [month, challenges]
+      properties:
+        month: { type: string, example: '2026-10' }
+        challenges:
+          type: array
+          items:
+            type: object
+            required: [code, title, description, target, progress, completed, points]
+            properties:
+              code: { type: string, enum: [INVEST_TWO_DAYS, PLAN_ON_TRACK, GROW_A_POT, THREE_SHARES] }
+              title: { type: string }
+              description: { type: string }
+              target: { type: integer }
+              progress: { type: integer }
+              completed: { type: boolean }
+              points: { type: integer }
+    Wrapped:
+      type: object
+      required: [year, title, monthsInvested, longestStreak, purchases, differentShares, invested, planInstalments, potPurchases,
+                 challengesCompleted, pointsEarned, badges]
+      properties:
+        year: { type: integer }
+        title: { type: string, description: 'A name for the year, from how steadily they invested.', example: The Steady Sprout }
+        monthsInvested: { type: integer }
+        longestStreak: { type: integer, description: 'The longest run of months with a purchase within the year.' }
+        purchases: { type: integer, description: 'Delivery purchases.' }
+        differentShares: { type: integer }
+        invested: { $ref: '#/components/schemas/Amount', description: 'What the purchases cost (shown only to the customer).' }
+        topShare:
+          type: object
+          required: [symbol, purchases]
+          properties:
+            symbol: { type: string }
+            purchases: { type: integer }
+        planInstalments: { type: integer }
+        potPurchases: { type: integer }
+        challengesCompleted: { type: integer }
+        pointsEarned: { type: integer, description: 'Points from the year''s purchases and challenges, vested or still pending.' }
+        firstPurchaseOn: { type: string, format: date }
+        badges: { type: array, items: { type: string }, description: 'Codes of the badges earned in the year.' }
     Projection:
       type: object
       required: [monthly, years, invested, rates]

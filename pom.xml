@@ -7,7 +7,7 @@
   <!-- Published through JitPack from git tags: com.github.SaiNayakk:sprout-contracts:<tag> -->
   <groupId>com.github.SaiNayakk</groupId>
   <artifactId>sprout-contracts</artifactId>
-  <version>0.9.1</version>
+  <version>0.10.0</version>
   <name>sprout-contracts</name>
   <description>OpenAPI specs and event schemas shared by Sprout's services.</description>
 
