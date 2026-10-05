@@ -30,6 +30,12 @@ public final class Contracts {
     /** OpenAPI spec for Sprout Bank, the simulated bank. */
     public static final String BANK_V1 = "sprout/contracts/openapi/bank-v1.yaml";
 
+    /** OpenAPI spec for the order management service (orders, holdings, positions, funds). */
+    public static final String OMS_V1 = "sprout/contracts/openapi/oms-v1.yaml";
+
+    /** OpenAPI spec for the Sprout Stock Exchange's member API, the simulated exchange. */
+    public static final String EXCHANGE_V1 = "sprout/contracts/openapi/exchange-v1.yaml";
+
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";
 

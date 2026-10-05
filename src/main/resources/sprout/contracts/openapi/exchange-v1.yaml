@@ -1,0 +1,183 @@
+openapi: 3.0.3
+info:
+  title: Sprout Stock Exchange (SSX) member API
+  version: 1.0.0
+  description: |
+    The simulated stock exchange, run beside Sprout Bank as part of "the outside world". Brokers
+    (members) send it orders; it executes them against the simulated market and tells the member
+    what happened. Customers never call it: Sprout's order service does, on their behalf.
+
+    **Members** authenticate with `X-Member-Key`. Each member has a callback URL and a secret for
+    signing what the exchange sends back.
+
+    **Trading hours** follow the market-data service: orders are accepted only while the market is
+    `OPEN`. Orders still open at the close expire.
+
+    **Matching.** The exchange is a deep market anchored to the simulated price: every execution is
+    for the whole quantity, at the last traded price.
+    - `MARKET` orders execute at once at the last price. With a `protectionPrice`, a buy never pays
+      more (a sell never gets less) than that; if the price is already beyond it, the order is
+      cancelled instead (like an immediate-or-cancel order).
+    - `LIMIT` orders execute at once if the last price is at or better than the limit, otherwise
+      rest until it is, and expire at the close if it never is.
+
+    **Prices** are rupee strings. A limit price must be a multiple of the instrument's tick size and
+    within the day's price band: 20% either side of the previous close.
+
+    **Idempotent.** The member's `clientOrderId` names the order. Sending the same order again
+    returns it (`200`); a different order under the same id is refused (`409`).
+
+    **Executions are reported by callback** (`ExecutionEvent`, below), signed with HMAC-SHA256 of
+    the body: header `X-Exchange-Signature: sha256=<hex>`. Each event is delivered until the member
+    answers 2xx, so it can arrive more than once; members apply each `eventId` once. Members can
+    also ask for an order's state at any time.
+servers:
+  - url: http://localhost:8108
+    description: The exchange (members only)
+paths:
+  /member/v1/orders:
+    post:
+      operationId: placeOrder
+      summary: Send an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewOrder' }
+      responses:
+        '201':
+          description: 'Accepted: `FILLED` at once, `OPEN` (a resting limit order) or `CANCELLED` (a market order beyond its protection).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '200':
+          description: The same order was sent before; its current state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: 'A different order already has this clientOrderId (`DUPLICATE_ORDER_ID`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: 'Refused, nothing recorded: `MARKET_CLOSED`, `UNKNOWN_INSTRUMENT`, `PRICE_OUT_OF_BAND`, `INVALID_TICK`.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /member/v1/orders/{clientOrderId}:
+    parameters:
+      - { name: clientOrderId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 64 } }
+    get:
+      operationId: getOrder
+      summary: An order's current state
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: cancelOrder
+      summary: Cancel an open order
+      responses:
+        '200':
+          description: 'Cancelled (or already cancelled).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 'Too late: the order already filled or expired (`ORDER_NOT_OPEN`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    memberKey: { type: apiKey, in: header, name: X-Member-Key }
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED`, `UNAUTHENTICATED` or `UPSTREAM_UNAVAILABLE` (no prices yet).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 'No order of this member with that id (`NOT_FOUND`).'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Price:
+      type: string
+      pattern: '^[0-9]{1,9}(\.[0-9]{1,2})?$'
+      example: '1520.35'
+    NewOrder:
+      type: object
+      additionalProperties: false
+      required: [clientOrderId, symbol, side, type, quantity]
+      properties:
+        clientOrderId: { type: string, minLength: 1, maxLength: 64 }
+        symbol: { type: string, example: HARBOR }
+        side: { type: string, enum: [BUY, SELL] }
+        type: { type: string, enum: [MARKET, LIMIT] }
+        quantity: { type: integer, minimum: 1, maximum: 1000000 }
+        limitPrice: { $ref: '#/components/schemas/Price' }
+        protectionPrice: { $ref: '#/components/schemas/Price' }
+    Order:
+      type: object
+      required: [exchangeOrderId, clientOrderId, symbol, side, type, quantity, status, filledQuantity, sessionDate, createdAt, updatedAt]
+      properties:
+        exchangeOrderId: { type: string, format: uuid }
+        clientOrderId: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        type: { type: string, enum: [MARKET, LIMIT] }
+        quantity: { type: integer }
+        limitPrice: { $ref: '#/components/schemas/Price' }
+        protectionPrice: { $ref: '#/components/schemas/Price' }
+        status: { type: string, enum: [OPEN, FILLED, CANCELLED, EXPIRED] }
+        filledQuantity: { type: integer }
+        price: { $ref: '#/components/schemas/Price' }
+        tradeId: { type: string, format: uuid }
+        reason: { type: string, description: 'Why it was cancelled or expired.' }
+        sessionDate: { type: string, format: date }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ExecutionEvent:
+      description: What the exchange sends to the member's callback URL.
+      type: object
+      required: [eventId, type, clientOrderId, exchangeOrderId, symbol, side, quantity, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        type: { type: string, enum: [ORDER_FILLED, ORDER_CANCELLED, ORDER_EXPIRED] }
+        clientOrderId: { type: string }
+        exchangeOrderId: { type: string, format: uuid }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        quantity: { type: integer }
+        price: { $ref: '#/components/schemas/Price' }
+        tradeId: { type: string, format: uuid }
+        reason: { type: string }
+        occurredAt: { type: string, format: date-time }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, DUPLICATE_ORDER_ID, MARKET_CLOSED, UNKNOWN_INSTRUMENT,
+                 PRICE_OUT_OF_BAND, INVALID_TICK, ORDER_NOT_OPEN, UPSTREAM_UNAVAILABLE]
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
+security:
+  - memberKey: []
