@@ -3,14 +3,15 @@
   <groupId>com.github.SaiNayakk</groupId>
   <artifactId>sprout-contracts</artifactId>
   <versioning>
-    <release>0.6.0</release>
+    <release>0.7.0</release>
     <versions>
       <version>0.3.2</version>
       <version>0.2.0</version>
       <version>0.4.0</version>
       <version>0.5.0</version>
       <version>0.6.0</version>
+      <version>0.7.0</version>
     </versions>
-    <lastUpdated>20261005063629</lastUpdated>
+    <lastUpdated>20261005074750</lastUpdated>
   </versioning>
 </metadata>
