@@ -20,6 +20,9 @@ info:
 
     **It ends.** An account belongs to its visitor for a limited time (`endsAt`); after that it is closed
     and its data swept away. Nothing a visitor types is kept beyond that.
+
+    **Deprecated: use v3** (sandbox-v3.yaml), a demo account of the visitor's own with no choosing of who to be.
+    The sandbox no longer answers this version.
 servers:
   - url: http://localhost:8100/api/sandbox
     description: Through the gateway
@@ -27,6 +30,7 @@ paths:
   /v2/groups:
     get:
       operationId: listGroups
+      deprecated: true
       summary: Who a visitor can explore as, and what their customer will be like
       security: []
       responses:
@@ -38,6 +42,7 @@ paths:
   /v2/demo-sessions:
     post:
       operationId: startDemo
+      deprecated: true
       summary: Explore Sprout as a customer of your own, from the chosen group, named as you choose
       security: []
       requestBody:

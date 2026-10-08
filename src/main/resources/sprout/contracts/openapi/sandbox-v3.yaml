@@ -1,0 +1,105 @@
+openapi: 3.0.3
+info:
+  title: Sprout Sandbox API v3 (the public demo)
+  version: 3.0.0
+  description: |
+    The public sandbox: anyone can try Sprout with an account of their own that already has months of
+    real history, without signing up. Signing up for real works too.
+
+    Clients reach these endpoints through the gateway under `/api/sandbox`, without signing in.
+
+    **An account of your own.** A visitor types the name they'd like to be called and is signed in to a
+    demo account nobody else is using, named as they typed.
+
+    **History is real.** The sandbox keeps a few demo accounts warm. Each lives every session of the
+    sandbox's fast market (about 30 trading days a day) the way a real customer does, through the same
+    services, exchange and books: a monthly plan, UPI spends rounded up into a savings pot, the odd share
+    bought or sold, money added when cash runs low. A visitor is given the warm account with the most
+    history, and a new one starts warming in its place.
+
+    **It ends.** The account is the visitor's until `endsAt`; then it is closed and its data swept away.
+    Nothing a visitor types is kept beyond that.
+servers:
+  - url: http://localhost:8100/api/sandbox
+    description: Through the gateway
+paths:
+  /v3/demo:
+    get:
+      operationId: demoStatus
+      summary: Whether a demo account is ready to try now
+      security: []
+      responses:
+        '200':
+          description: The demo's state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoStatus' }
+  /v3/demo-sessions:
+    post:
+      operationId: startDemo
+      summary: Try Sprout with a demo account of your own, named as you choose
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 40
+                  description: 'What to call you. Letters, spaces and . , - '' only.'
+                  example: Asha
+      responses:
+        '201':
+          description: Signed in to your own demo account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoSession' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '503':
+          description: 'No demo account is ready yet, or it can''t be signed in right now (`UPSTREAM_UNAVAILABLE`).'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  responses:
+    Problem:
+      description: 'A problem: `VALIDATION_FAILED` or `UPSTREAM_UNAVAILABLE`.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    DemoStatus:
+      type: object
+      required: [ready, endsAfterMinutes]
+      properties:
+        ready: { type: boolean, description: 'Whether a demo account can be given out now.' }
+        sessionsLived: { type: integer, description: 'How much history the next account has, in trading sessions (absent when none is ready).' }
+        endsAfterMinutes: { type: integer, description: 'How long a visitor keeps their account.' }
+    DemoSession:
+      type: object
+      required: [name, sessionsLived, endsAt, accessToken, tokenType, expiresIn, refreshToken]
+      properties:
+        name: { type: string, example: Asha, description: 'As the visitor typed it.' }
+        sessionsLived: { type: integer, description: 'How many trading sessions of history the account has.' }
+        endsAt: { type: string, format: date-time, description: 'When the account is closed and swept away.' }
+        accessToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer }
+        refreshToken: { type: string }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE] }
+        retryAfterSeconds: { type: integer }
+        requestId: { type: string }
