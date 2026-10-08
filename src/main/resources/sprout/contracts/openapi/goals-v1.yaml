@@ -48,6 +48,8 @@ paths:
     post:
       operationId: createPot
       summary: Start a pot
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional. Repeating a request with the same key returns the original result (200) instead of doing it again.', schema: { type: string, minLength: 8, maxLength: 100 } }
       requestBody:
         required: true
         content:
@@ -64,6 +66,11 @@ paths:
       responses:
         '201':
           description: Started.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pot' }
+        '200':
+          description: 'The same request again (same Idempotency-Key): the original result.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Pot' }

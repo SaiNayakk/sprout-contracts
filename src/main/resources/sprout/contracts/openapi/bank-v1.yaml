@@ -154,6 +154,8 @@ paths:
     post:
       operationId: payByUpi
       summary: Pay someone by UPI address, with my UPI PIN
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional. Repeating a request with the same key returns the original result (200) instead of doing it again.', schema: { type: string, minLength: 8, maxLength: 100 } }
       requestBody:
         required: true
         content:
@@ -170,6 +172,11 @@ paths:
       responses:
         '201':
           description: Paid. The debit from my account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '200':
+          description: 'The same request again (same Idempotency-Key): the original result.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Transaction' }

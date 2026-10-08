@@ -159,6 +159,8 @@ paths:
     post:
       operationId: createSquad
       summary: Start a squad
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, description: 'Optional. Repeating a request with the same key returns the original result (200) instead of doing it again.', schema: { type: string, minLength: 8, maxLength: 100 } }
       requestBody:
         required: true
         content:
@@ -173,6 +175,11 @@ paths:
       responses:
         '201':
           description: Started; share the invite code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Squad' }
+        '200':
+          description: 'The same request again (same Idempotency-Key): the original result.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Squad' }
