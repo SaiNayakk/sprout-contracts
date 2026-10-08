@@ -20,6 +20,9 @@ info:
     reconciliation are exactly as real as anyone's.
 
     Several visitors can be the same person at once; what one does, the next sees.
+
+    **Superseded by v2** (sandbox-v2.yaml): each visitor gets an account of their own, named as they choose.
+    v1 still answers, from the same pool of accounts, with the group's customer under a default name.
 servers:
   - url: http://localhost:8100/api/sandbox
     description: Through the gateway
