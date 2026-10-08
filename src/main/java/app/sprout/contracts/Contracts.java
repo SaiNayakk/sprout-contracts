@@ -66,6 +66,7 @@ public final class Contracts {
     /** OpenAPI spec for the public sandbox: fictional customers to explore as. */
     public static final String SANDBOX_V1 = "sprout/contracts/openapi/sandbox-v1.yaml";
     public static final String SANDBOX_V2 = "sprout/contracts/openapi/sandbox-v2.yaml";
+    public static final String SANDBOX_V3 = "sprout/contracts/openapi/sandbox-v3.yaml";
 
     /** JSON Schema for the marketdata.tick event, version 1. */
     public static final String TICK_V1 = "sprout/contracts/events/marketdata/tick.v1.schema.json";

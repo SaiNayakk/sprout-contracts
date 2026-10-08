@@ -23,6 +23,9 @@ info:
 
     **Superseded by v2** (sandbox-v2.yaml): each visitor gets an account of their own, named as they choose.
     v1 still answers, from the same pool of accounts, with the group's customer under a default name.
+
+    **Deprecated: use v3** (sandbox-v3.yaml), a demo account of the visitor's own with no choosing of who to be.
+    The sandbox no longer answers this version.
 servers:
   - url: http://localhost:8100/api/sandbox
     description: Through the gateway
@@ -30,6 +33,7 @@ paths:
   /v1/personas:
     get:
       operationId: listPersonas
+      deprecated: true
       summary: The fictional people a visitor can explore as, by group
       security: []
       responses:
@@ -41,6 +45,7 @@ paths:
   /v1/demo-sessions:
     post:
       operationId: startDemo
+      deprecated: true
       summary: Explore Sprout as someone from the chosen group
       security: []
       requestBody:
