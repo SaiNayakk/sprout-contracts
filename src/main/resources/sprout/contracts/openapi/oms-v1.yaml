@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Sprout Orders API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Buying and selling shares: orders, what you hold, your intraday positions and your funds.
 
@@ -117,6 +117,22 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/orders/{id}/trace:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    get:
+      operationId: traceOrder
+      summary: 'The way one of my orders went through Sprout, step by step, with when each happened (1.1)'
+      description: |
+        Built from what each step recorded: placed in the order service, money held in the ledger, sent to and
+        matched on the exchange, settled in the ledger, and the holdings updated. Steps not reached yet are
+        absent; `complete` is true once the order has nowhere further to go. The demo's pipeline view polls it.
+      responses:
+        '200':
+          description: The order's way so far.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderTrace' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /v1/holdings:
     get:
       operationId: listHoldings
@@ -372,6 +388,25 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    OrderTrace:
+      type: object
+      required: [orderId, complete, steps]
+      properties:
+        orderId: { type: string, format: uuid }
+        complete: { type: boolean, description: 'Filled, rejected, cancelled or expired: no further steps will come.' }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/TraceStep' }
+    TraceStep:
+      type: object
+      required: [service, step, at, status]
+      properties:
+        service: { type: string, enum: [oms, ledger, exchange, portfolio], description: 'Which part of Sprout did it.' }
+        step: { type: string, example: 'Matched on the exchange at ₹158.20' }
+        at: { type: string, format: date-time }
+        durationMs: { type: integer, format: int64, description: 'Since the step before (absent for the first).' }
+        status: { type: string, enum: [ok, failed, pending] }
+        detail: { type: string }
     Amount:
       type: string
       pattern: '^[0-9]{1,13}(\.[0-9]{1,2})?$'
