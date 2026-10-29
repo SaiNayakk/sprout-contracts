@@ -88,7 +88,7 @@ paths:
           description: 'No open demo account has this key: it was closed (`DEMO_SESSION_ENDED`); start a new one.'
           content:
             application/problem+json:
-              schema: { $ref: '#/components/schemas/Problem' }
+              schema: { $ref: '#/components/schemas/SessionEnded' }
   /v3/demo-sessions/leave:
     post:
       operationId: leaveDemo
@@ -138,6 +138,16 @@ components:
       properties:
         demoSession: { type: string, minLength: 20, maxLength: 100 }
         active: { type: boolean, default: false, description: 'Whether the visitor did anything since the last heartbeat.' }
+    SessionEnded:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string, enum: [DEMO_SESSION_ENDED] }
+        requestId: { type: string }
     Problem:
       type: object
       required: [type, title, status, code]
@@ -146,6 +156,6 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
-        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE, DEMO_SESSION_ENDED] }
+        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE] }
         retryAfterSeconds: { type: integer }
         requestId: { type: string }
