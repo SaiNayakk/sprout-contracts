@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Sprout Sandbox API v3 (the public demo)
-  version: 3.0.0
+  version: 3.1.0
   description: |
     The public sandbox: anyone can try Sprout with an account of their own that already has months of
     real history, without signing up. Signing up for real works too.
@@ -19,6 +19,11 @@ info:
 
     **It ends.** The account is the visitor's until `endsAt`; then it is closed and its data swept away.
     Nothing a visitor types is kept beyond that.
+
+    **While you're here (3.1).** The web app sends a heartbeat every 30 seconds with the `demoSession` key it
+    was given, saying whether the visitor did anything since the last one. The account is closed sooner than
+    `endsAt` when the heartbeats stop (the tab was closed) or the visitor has done nothing for a while, and at
+    once when the web app says they left. Older clients that send no heartbeat keep the account until `endsAt`.
 servers:
   - url: http://localhost:8100/api/sandbox
     description: Through the gateway
@@ -66,6 +71,39 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /v3/demo-sessions/heartbeat:
+    post:
+      operationId: demoHeartbeat
+      summary: The visitor is still here (and whether they did anything since the last heartbeat)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Presence' }
+      responses:
+        '204': { description: Noted. }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: 'No open demo account has this key: it was closed (`DEMO_SESSION_ENDED`); start a new one.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /v3/demo-sessions/leave:
+    post:
+      operationId: leaveDemo
+      summary: The visitor left; their account is closed now (safe to repeat; sent with navigator.sendBeacon)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Presence' }
+          text/plain:
+            schema: { type: string, description: 'The same JSON, as sendBeacon sends it.' }
+      responses:
+        '204': { description: 'Closed, or already closed.' }
+        '400': { $ref: '#/components/responses/Problem' }
 components:
   responses:
     Problem:
@@ -92,6 +130,14 @@ components:
         tokenType: { type: string, enum: [Bearer] }
         expiresIn: { type: integer }
         refreshToken: { type: string }
+        demoSession: { type: string, description: 'The key the heartbeats send (3.1). Keep it with the tokens; it is shown once.' }
+    Presence:
+      type: object
+      additionalProperties: false
+      required: [demoSession]
+      properties:
+        demoSession: { type: string, minLength: 20, maxLength: 100 }
+        active: { type: boolean, default: false, description: 'Whether the visitor did anything since the last heartbeat.' }
     Problem:
       type: object
       required: [type, title, status, code]
@@ -100,6 +146,6 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
-        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE] }
+        code: { type: string, enum: [VALIDATION_FAILED, RATE_LIMITED, UPSTREAM_UNAVAILABLE, DEMO_SESSION_ENDED] }
         retryAfterSeconds: { type: integer }
         requestId: { type: string }
